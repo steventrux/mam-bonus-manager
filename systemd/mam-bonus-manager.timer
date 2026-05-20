@@ -2,8 +2,8 @@
 Description=Run MAM bonus manager periodically
 
 [Timer]
-# Prima esecuzione 5 minuti dopo il boot, poi ogni ora.
-# Lo script compra wedge solo se sono passate WEDGE_HOURS ore.
+# First run 5 minutes after boot, then every hour.
+# The script only buys wedges when WEDGE_HOURS have elapsed.
 OnBootSec=5min
 OnUnitActiveSec=1h
 Persistent=true
