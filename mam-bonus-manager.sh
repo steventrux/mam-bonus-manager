@@ -278,14 +278,12 @@ buy_upload_until_buffer() {
 }
 
 manual_vip_step() {
-  local points="$1" spendable max_weeks weeks cost now result success error_message
+  local points="$1" max_weeks weeks cost now result success error_message
   valid_integer "$VIP_WEEK_COST" || fatal "VIP_WEEK_COST must be numeric: $VIP_WEEK_COST"
 
   log "Manual step 1/3 - VIP"
-  spendable=0
-  [[ "$points" -gt "$BUFFER" ]] && spendable=$((points - BUFFER))
-  max_weeks=$((spendable / VIP_WEEK_COST))
-  log "Current points: ${points}. Buffer: ${BUFFER}. VIP cost: ${VIP_WEEK_COST} points/week. Purchasable VIP weeks: ${max_weeks}."
+  max_weeks=$((points / VIP_WEEK_COST))
+  log "Current points: ${points}. VIP cost: ${VIP_WEEK_COST} points/week. Purchasable VIP weeks: ${max_weeks}."
 
   weeks="$(ask_integer "Buy how many VIP weeks? [0-${max_weeks}, Enter=0]: " "$max_weeks")"
   [[ "$weeks" -eq 0 ]] && { log "VIP skipped."; printf '%s\n' "$points"; return 0; }
@@ -340,14 +338,12 @@ manual_wedge_step() {
 }
 
 manual_upload_step() {
-  local points="$1" pack spendable pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost
+  local points="$1" pack pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost
   valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
 
   log "Manual step 3/3 - Upload credit"
-  spendable=0
-  [[ "$points" -gt "$BUFFER" ]] && spendable=$((points - BUFFER))
-  log "Current points: ${points}. Buffer: ${BUFFER}. Automated upload minimum: ${MIN_UPLOAD_GB}GB."
-  log "Purchasable upload packages with the current buffer:"
+  log "Current points: ${points}. Automated upload minimum: ${MIN_UPLOAD_GB}GB."
+  log "Purchasable upload packages with the current balance:"
 
   for pack in $UPLOAD_PACKS; do
     valid_integer "$pack" || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
@@ -356,7 +352,7 @@ manual_upload_step() {
       continue
     fi
     pack_cost=$((pack * 500))
-    max_count=$((spendable / pack_cost))
+    max_count=$((points / pack_cost))
     log " - ${pack}GB: up to ${max_count} purchase(s), ${pack_cost} points each."
   done
 
@@ -374,7 +370,7 @@ manual_upload_step() {
   [[ "$allowed_package" -eq 1 ]] || fatal "Upload package ${chosen_pack}GB is not allowed. Allowed automated packages: ${UPLOAD_PACKS}; minimum: ${MIN_UPLOAD_GB}GB."
 
   pack_cost=$((chosen_pack * 500))
-  max_count=$((spendable / pack_cost))
+  max_count=$((points / pack_cost))
   chosen_count="$(ask_integer "Buy how many ${chosen_pack}GB upload package(s)? [0-${max_count}, Enter=0]: " "$max_count")"
   [[ "$chosen_count" -eq 0 ]] && { log "Upload credit skipped."; printf '%s\n' "$points"; return 0; }
 
@@ -400,6 +396,7 @@ manual_upload_step() {
 run_manual_mode() {
   local points="$1"
   log "Interactive manual mode started. Each step shows the currently purchasable quantity before asking for input."
+  log "Manual mode does not apply the automated upload buffer. It only prevents spending more points than currently available."
   [[ "$DRY_RUN" -eq 1 ]] && log "DRY-RUN is enabled: no purchase will be sent to MAM."
 
   points="$(manual_vip_step "$points" | tail -n1)"
