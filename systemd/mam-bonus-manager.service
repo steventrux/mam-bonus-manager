@@ -1,0 +1,9 @@
+[Unit]
+Description=MAM bonus manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mam-bonus-manager run
+Environment=MAM_CONFIG=/etc/mam-bonus-manager/config.env
