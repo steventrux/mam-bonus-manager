@@ -195,7 +195,11 @@ buy_vip_if_enabled() {
   now="$(date +%s%3N)"
   result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=max&_=${now}")" || { warn "VIP purchase failed: curl/API error."; return 0; }
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
-  [[ "$success" == "true" ]] && log "VIP purchased/extended." || warn "VIP purchase was not confirmed: $result"
+  if [[ "$success" == "true" ]]; then
+    log "VIP purchased/extended."
+  else
+    warn "VIP purchase was not confirmed: $result"
+  fi
 }
 
 buy_upload_until_buffer() {
