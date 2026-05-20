@@ -59,14 +59,14 @@ Main variables:
 | `LOG_FILE` | empty | optional extra log file path |
 | `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit in automated mode |
 | `VIP` | `0` | set to `1` to enable automated VIP purchase/extension |
-| `VIP_WEEK_COST` | `5000` | VIP cost per week, used by interactive mode |
+| `VIP_BLOCK_COST` | `5000` | VIP cost for one 4-week block; manual VIP supports `4`, `8`, `12`, or `max` |
 | `VIP_THRESHOLD_WEEKS` | `11` | automated VIP purchase threshold |
 | `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables automated wedges |
 | `WEDGE_COST` | `50000` | wedge cost in bonus points |
 | `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after automated or manual wedge purchases |
 | `MIN_UPLOAD_GB` | `50` | minimum upload package size allowed for automated API purchases |
 | `UPLOAD_PACKS` | `100 50` | upload credit package sizes to buy, in GB |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.0` | User-Agent sent by curl |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.2` | User-Agent sent by curl |
 | `HEARTBEAT_URL` | empty | optional HTTP heartbeat URL |
 | `TELEGRAM_DAILY_SUMMARY` | `0` | set to `1` to enable daily Telegram purchase summaries |
 | `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token |
@@ -123,6 +123,8 @@ It proceeds in three steps:
 
 Before each step, the script prints the current points, the relevant cost and the maximum quantity currently purchasable. You can enter `0` or press Enter to skip a step.
 
+Manual VIP accepts only the documented durations: `4`, `8`, `12`, or `max`. The default cost is `5000` points per 4-week block, so `4` costs 5000 points, `8` costs 10000 points, and `12` costs 15000 points. The `max` option lets the API decide the maximum valid duration.
+
 Manual mode does **not** apply the automated `BUFFER` to VIP or upload purchases. It only prevents you from selecting more than your current balance can buy. Wedges still respect `WEDGE_RESERVE_AFTER`, because that setting is specific to wedge safety.
 
 Example safe test:
@@ -131,7 +133,7 @@ Example safe test:
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
 ```
 
-In `--dry-run` mode, no purchase is sent to MAM. The script only estimates the point balance after each selected step.
+In `--dry-run` mode, no purchase is sent to MAM. The script only estimates the point balance after each selected step. For manual VIP `max`, the final cost is decided by the API, so dry-run leaves the point estimate unchanged.
 
 ## Notifications
 
