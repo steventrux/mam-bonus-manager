@@ -14,21 +14,21 @@ usage() {
   cat <<USAGE
 mam-bonus-manager v${VERSION}
 
-Uso:
-  ./mam-bonus-manager.sh [opzioni] [comando]
+Usage:
+  ./mam-bonus-manager.sh [options] [command]
 
-Comandi:
-  run             Esegue il ciclo: sessione, wedge, VIP, upload bonus. Default.
-  check-session   Verifica/crea solo la sessione MAM.
-  points          Mostra solo i punti seedbonus correnti.
-  help            Mostra questo aiuto.
+Commands:
+  run             Run the full cycle: session, wedge, VIP, upload credit. Default.
+  check-session   Validate or recreate the MAM session only.
+  points          Show the current seedbonus balance only.
+  help            Show this help message.
 
-Opzioni:
-  --config FILE   Configurazione da usare. Default: ${CONFIG_FILE}
-  --dry-run       Non acquista nulla: stampa solo cosa farebbe.
-  --version       Mostra la versione.
+Options:
+  --config FILE   Configuration file to use. Default: ${CONFIG_FILE}
+  --dry-run       Do not buy anything; only print what would be done.
+  --version       Show the version.
 
-Esempi:
+Examples:
   ./mam-bonus-manager.sh --dry-run
   MAM_CONFIG=./config.env ./mam-bonus-manager.sh run
 USAGE
@@ -37,22 +37,22 @@ USAGE
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --config) CONFIG_FILE="${2:-}"; [[ -n "$CONFIG_FILE" ]] || fatal "--config richiede un file"; shift 2 ;;
+      --config) CONFIG_FILE="${2:-}"; [[ -n "$CONFIG_FILE" ]] || fatal "--config requires a file path"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
       --version) echo "$VERSION"; exit 0 ;;
       -h|--help|help) COMMAND="help"; shift ;;
       run|check-session|points) COMMAND="$1"; shift ;;
-      *) fatal "Argomento sconosciuto: $1" ;;
+      *) fatal "Unknown argument: $1" ;;
     esac
   done
 }
 
 load_config() {
-  [[ -r "$CONFIG_FILE" ]] || fatal "Config non leggibile: $CONFIG_FILE. Copia config/config.env.example e inserisci MAM_ID."
+  [[ -r "$CONFIG_FILE" ]] || fatal "Configuration file is not readable: $CONFIG_FILE. Copy config/config.env.example and set MAM_ID."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 
-  : "${MAM_ID:?MAM_ID mancante in $CONFIG_FILE}"
+  : "${MAM_ID:?MAM_ID is missing in $CONFIG_FILE}"
   : "${WORKDIR:=/opt/MAM}"
   : "${BUFFER:=55000}"
   : "${VIP:=0}"
@@ -80,7 +80,7 @@ check_dependencies() {
   for bin in curl jq date find flock; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
-  [[ ${#missing[@]} -eq 0 ]] || fatal "Dipendenze mancanti: ${missing[*]}"
+  [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
 }
 
 json_get() {
@@ -114,7 +114,7 @@ get_uid_from_summary() {
 
 create_session() {
   local response uid
-  log "Sessione non valida: provo a crearne una nuova con MAM_ID."
+  log "Session is invalid: trying to create a new one with MAM_ID."
   response="$(json_get_with_mamid "${BASE_URL}/jsonLoad.php?snatch_summary")" || return 1
   printf '%s' "$response" > "$JSON_FILE"
   uid="$(jq -r '.uid // empty' < "$JSON_FILE" 2>/dev/null || true)"
@@ -125,23 +125,23 @@ create_session() {
 
 ensure_session() {
   local uid
-  log "Verifico cookie esistente."
+  log "Checking existing cookie."
   if uid="$(get_uid_from_summary)"; then
-    log "Sessione esistente valida. UID: ${uid}"
+    log "Existing session is valid. UID: ${uid}"
     printf '%s\n' "$uid"
     return 0
   fi
 
-  uid="$(create_session)" || fatal "Impossibile creare una nuova sessione MAM. Controlla MAM_ID."
-  log "Nuova sessione creata. UID: ${uid}"
+  uid="$(create_session)" || fatal "Could not create a new MAM session. Check MAM_ID."
+  log "New session created. UID: ${uid}"
   printf '%s\n' "$uid"
 }
 
 get_points() {
   local uid="$1" response points
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || fatal "Impossibile leggere i seedbonus."
+  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || fatal "Could not read seedbonus balance."
   points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
-  valid_number "$points" || fatal "Seedbonus non valido nella risposta JSON: ${points:-vuoto}"
+  valid_number "$points" || fatal "Invalid seedbonus value in JSON response: ${points:-empty}"
   int_part "$points"
 }
 
@@ -154,31 +154,31 @@ buy_wedge_if_needed() {
   [[ "$mins" -lt 1 ]] && mins=1
 
   if find "$WEDGE_STATE_FILE" -mmin "-${mins}" 2>/dev/null | grep -q .; then
-    log "Wedge già acquistato di recente: salto."
+    log "A wedge was bought recently: skipping."
     printf '%s\n' "$points"
     return 0
   fi
 
   min_points=$((WEDGE_COST + WEDGE_RESERVE_AFTER))
   if [[ "$points" -lt "$min_points" ]]; then
-    log "Wedge da acquistare, ma punti insufficienti: ${points}. Minimo richiesto: ${min_points}."
+    log "A wedge is due, but there are not enough points: ${points}. Required minimum: ${min_points}."
     printf '%s\n' "$points"
     return 0
   fi
 
-  log "Wedge da acquistare. Punti attuali: ${points}."
+  log "A wedge is due. Current points: ${points}."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY-RUN: comprerei un wedge e aggiornerei ${WEDGE_STATE_FILE}."
+    log "DRY-RUN: would buy one wedge and update ${WEDGE_STATE_FILE}."
     printf '%s\n' "$points"
     return 0
   fi
 
   now="$(date +%s%3N)"
-  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=wedges&source=points&_=${now}")" || fatal "Acquisto wedge fallito: errore curl/API."
+  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=wedges&source=points&_=${now}")" || fatal "Wedge purchase failed: curl/API error."
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
-  [[ "$success" == "true" ]] || warn "La risposta wedge non indica success=true: $result"
+  [[ "$success" == "true" ]] || warn "Wedge response does not report success=true: $result"
   touch "$WEDGE_STATE_FILE"
-  log "Wedge acquistato."
+  log "Wedge purchased."
   printf '%s\n' "$(get_points "$MAM_UID")"
 }
 
@@ -186,44 +186,44 @@ buy_vip_if_enabled() {
   local now result success
   [[ "$VIP" == "1" || "$VIP" == "true" || "$VIP" == "yes" ]] || return 0
 
-  log "VIP abilitato: provo a massimizzare la durata."
+  log "VIP is enabled: trying to maximize duration."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY-RUN: comprerei VIP duration=max."
+    log "DRY-RUN: would buy VIP duration=max."
     return 0
   fi
 
   now="$(date +%s%3N)"
-  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=max&_=${now}")" || { warn "Acquisto VIP fallito: errore curl/API."; return 0; }
+  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=max&_=${now}")" || { warn "VIP purchase failed: curl/API error."; return 0; }
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
-  [[ "$success" == "true" ]] && log "VIP acquistato/esteso." || warn "Acquisto VIP non confermato: $result"
+  [[ "$success" == "true" ]] && log "VIP purchased/extended." || warn "VIP purchase was not confirmed: $result"
 }
 
 buy_upload_until_buffer() {
   local points="$1" pack required now response new_points
   for pack in $UPLOAD_PACKS; do
-    [[ "$pack" =~ ^[0-9]+$ ]] || fatal "UPLOAD_PACKS contiene un valore non numerico: $pack"
+    [[ "$pack" =~ ^[0-9]+$ ]] || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
     required=$((pack * 500 + BUFFER))
-    log "Controllo pacchetto upload ${pack}GB. Soglia acquisto: > ${required} punti."
+    log "Checking ${pack}GB upload package. Purchase threshold: > ${required} points."
 
     while [[ "$points" -gt "$required" ]]; do
-      log "${points} > ${required}: acquisto ${pack}GB di upload."
+      log "${points} > ${required}: buying ${pack}GB of upload credit."
       if [[ "$DRY_RUN" -eq 1 ]]; then
-        log "DRY-RUN: comprerei ${pack}GB. Stimo decremento di $((pack * 500)) punti."
+        log "DRY-RUN: would buy ${pack}GB. Estimated decrease: $((pack * 500)) points."
         points=$((points - pack * 500))
         continue
       fi
 
       now="$(date +%s%3N)"
-      response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${pack}&_=${now}")" || fatal "Acquisto upload ${pack}GB fallito: errore curl/API."
+      response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${pack}&_=${now}")" || fatal "Upload purchase failed for ${pack}GB: curl/API error."
       new_points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
-      valid_number "$new_points" || fatal "Acquisto upload non verificabile. Risposta: $response"
+      valid_number "$new_points" || fatal "Upload purchase could not be verified. Response: $response"
       new_points="$(int_part "$new_points")"
 
       if [[ "$new_points" -lt "$points" ]]; then
         points="$new_points"
-        log "Acquisto completato. Punti residui: ${points}."
+        log "Purchase completed. Remaining points: ${points}."
       else
-        fatal "I punti non sono diminuiti dopo l'acquisto. Prima=${points}, Dopo=${new_points}."
+        fatal "Points did not decrease after the purchase. Before=${points}, After=${new_points}."
       fi
     done
   done
@@ -235,20 +235,20 @@ run_main() {
   load_config
 
   exec 9>"$LOCK_FILE"
-  flock -n 9 || fatal "Un'altra esecuzione è già in corso: $LOCK_FILE"
+  flock -n 9 || fatal "Another run is already in progress: $LOCK_FILE"
 
   MAM_UID="$(ensure_session | tail -n1)"
   [[ "$COMMAND" == "check-session" ]] && return 0
 
-  log "Raccolgo punti correnti."
+  log "Fetching current points."
   POINTS="$(get_points "$MAM_UID")"
-  log "Punti correnti: ${POINTS}"
+  log "Current points: ${POINTS}"
   [[ "$COMMAND" == "points" ]] && return 0
 
   POINTS="$(buy_wedge_if_needed "$POINTS" | tail -n1)"
   buy_vip_if_enabled
   POINTS="$(buy_upload_until_buffer "$POINTS" | tail -n1)"
-  log "Fine. Punti finali stimati/attuali: ${POINTS}"
+  log "Done. Final estimated/current points: ${POINTS}"
 }
 
 parse_args "$@"
