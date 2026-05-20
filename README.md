@@ -1,17 +1,20 @@
 # mam-bonus-manager
 
-Script Bash ottimizzato per gestire automaticamente i seedbonus di MyAnonamouse:
+A safe and configurable Bash script for managing MyAnonamouse bonus points automatically.
 
-- verifica o ricrea la sessione usando `MAM_ID`;
-- legge i punti seedbonus correnti;
-- compra wedge a intervalli configurabili;
-- opzionalmente estende/acquista VIP;
-- compra upload bonus a pacchetti, senza scendere sotto il buffer configurato;
-- evita esecuzioni parallele con `flock`;
-- supporta `--dry-run` per test sicuri;
-- tiene segreti e cookie fuori dal repository.
+It can:
 
-## Installazione rapida
+- validate or recreate the MAM session using `MAM_ID`;
+- read the current seedbonus balance;
+- buy wedges at a configurable interval;
+- optionally buy or extend VIP;
+- buy upload credit in configurable package sizes;
+- keep a configurable points buffer untouched;
+- prevent concurrent runs with `flock`;
+- run safely in `--dry-run` mode;
+- keep secrets and cookies outside the repository.
+
+## Quick start
 
 ```bash
 sudo mkdir -p /etc/mam-bonus-manager /opt/MAM
@@ -23,34 +26,34 @@ chmod +x mam-bonus-manager.sh
 ./mam-bonus-manager.sh --dry-run
 ```
 
-Dipendenze:
+Dependencies:
 
 ```bash
 sudo apt update
 sudo apt install -y curl jq util-linux findutils
 ```
 
-## Configurazione
+## Configuration
 
-Il file reale va tenuto fuori da git:
+The real configuration file should stay outside git:
 
 ```text
 /etc/mam-bonus-manager/config.env
 ```
 
-Variabili principali:
+Main variables:
 
-| Variabile | Default | Significato |
+| Variable | Default | Meaning |
 | --- | ---: | --- |
-| `MAM_ID` | obbligatoria | valore del cookie `mam_id` |
-| `WORKDIR` | `/opt/MAM` | directory per cookie, lock e stato |
-| `BUFFER` | `55000` | punti da conservare prima di comprare upload |
-| `VIP` | `0` | `1` abilita acquisto VIP |
-| `WEDGE_HOURS` | `4` | intervallo wedge; `0` disabilita |
-| `WEDGE_RESERVE_AFTER` | `5000` | punti minimi da lasciare dopo wedge |
-| `UPLOAD_PACKS` | `100 20 5 1` | pacchetti upload da acquistare |
+| `MAM_ID` | required | value of the `mam_id` cookie |
+| `WORKDIR` | `/opt/MAM` | working directory for cookies, lock file and state files |
+| `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit |
+| `VIP` | `0` | set to `1` to enable VIP purchase/extension |
+| `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables wedges |
+| `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after a wedge purchase |
+| `UPLOAD_PACKS` | `100 20 5 1` | upload credit package sizes to buy, in GB |
 
-## Uso
+## Usage
 
 ```bash
 ./mam-bonus-manager.sh --dry-run
@@ -59,7 +62,7 @@ Variabili principali:
 ./mam-bonus-manager.sh points
 ```
 
-Con config alternativa:
+Use an alternate config file:
 
 ```bash
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
@@ -77,30 +80,32 @@ sudo systemctl enable --now mam-bonus-manager.timer
 systemctl list-timers mam-bonus-manager.timer
 ```
 
-Test manuale:
+Manual test:
 
 ```bash
 sudo systemctl start mam-bonus-manager.service
 journalctl -u mam-bonus-manager.service -n 100 --no-pager
 ```
 
-## Migliorie rispetto allo script originale
+## Improvements over the original script
 
-- `MAM_ID` non è più scritto nello script.
-- Cookie e config hanno permessi restrittivi.
-- URL wedge/VIP/upload usano timestamp aggiornato a ogni chiamata.
-- `curl` usa timeout, retry e fallisce in modo esplicito.
-- Validazione numerica dei punti prima di confronti aritmetici.
-- Lock anti doppia esecuzione.
-- `--dry-run` per vedere gli acquisti previsti senza spendere punti.
-- `WEDGE_RESERVE_AFTER` evita di comprare wedge se resterebbero troppo pochi punti.
-- Script più leggibile, diviso in funzioni e con messaggi di log chiari.
+- `MAM_ID` is no longer stored in the script.
+- Cookies and configuration files use restrictive permissions.
+- Wedge, VIP and upload URLs use a fresh timestamp for each request.
+- `curl` uses timeouts, retries and explicit failure handling.
+- Bonus points are validated before numeric comparisons.
+- A lock file prevents overlapping runs.
+- `--dry-run` shows planned purchases without spending points.
+- `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
+- The script is function-based and easier to read and maintain.
 
-## Sicurezza
+## Safety notes
 
-Non committare mai:
+Never commit:
 
-- `MAM_ID` reale;
+- the real `MAM_ID` value;
 - `MAM.cookies`;
-- file `config.env` reale;
-- log contenenti risposte API sensibili.
+- the real `config.env` file;
+- logs containing sensitive API responses.
+
+Run `--dry-run` first after every configuration change.
