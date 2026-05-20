@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.2.0"
+VERSION="1.2.1"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
@@ -96,7 +96,7 @@ load_config() {
   WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
   BUFFER="${MAM_BUFFER:-${BUFFER:-55000}}"
   VIP="${MAM_VIP:-${VIP:-0}}"
-  VIP_WEEK_COST="${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}"
+  VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
   VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
   WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-4}}}"
   WEDGE_COST="${MAM_WEDGE_COST:-${WEDGE_COST:-50000}}"
@@ -490,34 +490,80 @@ buy_upload_until_buffer() {
 }
 
 manual_vip_step() {
-  local points="$1" max_weeks weeks cost now result success error_message before refreshed_points actual_cost
-  valid_integer "$VIP_WEEK_COST" || fatal "VIP_WEEK_COST must be numeric: $VIP_WEEK_COST"
+  local points="$1" option cost now result success error_message before refreshed_points actual_cost
+  local max_suffix=""
+  valid_integer "$VIP_BLOCK_COST" || fatal "VIP_BLOCK_COST must be numeric: $VIP_BLOCK_COST"
 
   log "Manual step 1/3 - VIP"
-  max_weeks=$((points / VIP_WEEK_COST))
-  log "Current points: ${points}. VIP cost: ${VIP_WEEK_COST} points/week. Purchasable VIP weeks: ${max_weeks}."
+  log "Current points: ${points}. VIP options are 4, 8, 12 weeks, or max. Cost is ${VIP_BLOCK_COST} points per 4-week block."
+  log "Purchasable VIP durations with the current balance:"
+  [[ "$points" -ge "$VIP_BLOCK_COST" ]] && log " - 4 weeks: available, cost ${VIP_BLOCK_COST} points." || log " - 4 weeks: unavailable, requires ${VIP_BLOCK_COST} points."
+  [[ "$points" -ge $((VIP_BLOCK_COST * 2)) ]] && log " - 8 weeks: available, cost $((VIP_BLOCK_COST * 2)) points." || log " - 8 weeks: unavailable, requires $((VIP_BLOCK_COST * 2)) points."
+  [[ "$points" -ge $((VIP_BLOCK_COST * 3)) ]] && log " - 12 weeks: available, cost $((VIP_BLOCK_COST * 3)) points." || log " - 12 weeks: unavailable, requires $((VIP_BLOCK_COST * 3)) points."
+  if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
+    log " - max: available; the API will buy the maximum valid duration up to the 90-day limit."
+    max_suffix=", max"
+  else
+    log " - max: unavailable, requires at least ${VIP_BLOCK_COST} points."
+  fi
 
-  weeks="$(ask_integer "Buy how many VIP weeks? [0-${max_weeks}, Enter=0]: " "$max_weeks")"
-  [[ "$weeks" -eq 0 ]] && { log "VIP skipped."; printf '%s\n' "$points"; return 0; }
+  while true; do
+    read -r -p "Choose VIP duration [0, 4, 8, 12${max_suffix}; Enter=0]: " option || option="0"
+    option="${option:-0}"
+    case "$option" in
+      0)
+        log "VIP skipped."
+        printf '%s\n' "$points"
+        return 0
+        ;;
+      4|8|12)
+        cost=$((option / 4 * VIP_BLOCK_COST))
+        if [[ "$points" -lt "$cost" ]]; then
+          warn "Not enough points for ${option} weeks. Required: ${cost}."
+          continue
+        fi
+        break
+        ;;
+      max)
+        cost=0
+        if [[ "$points" -lt "$VIP_BLOCK_COST" ]]; then
+          warn "Not enough points for max. Required minimum: ${VIP_BLOCK_COST}."
+          continue
+        fi
+        break
+        ;;
+      *)
+        warn "Please enter 0, 4, 8, 12 or max."
+        ;;
+    esac
+  done
 
-  cost=$((weeks * VIP_WEEK_COST))
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY-RUN: would buy ${weeks} VIP week(s). Estimated cost: ${cost} points."
-    printf '%s\n' "$((points - cost))"
+    if [[ "$option" == "max" ]]; then
+      log "DRY-RUN: would buy VIP duration=max. The API decides the final cost."
+      printf '%s\n' "$points"
+    else
+      log "DRY-RUN: would buy ${option} VIP week(s). Estimated cost: ${cost} points."
+      printf '%s\n' "$((points - cost))"
+    fi
     return 0
   fi
 
   before="$points"
   now="$(date +%s%3N)"
-  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=${weeks}&_=${now}")" || fatal "VIP purchase failed: curl/API error."
+  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=${option}&_=${now}")" || fatal "VIP purchase failed: curl/API error."
   error_message="$(jq -r '.error // empty' <<< "$result" 2>/dev/null || true)"
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
   [[ "$success" == "true" ]] || fatal "VIP purchase was not confirmed. API error: ${error_message:-none}. Response: $result"
   refreshed_points="$(get_points "$MAM_UID")"
   actual_cost=$((before - refreshed_points))
-  [[ "$actual_cost" -lt 0 ]] && actual_cost="$cost"
-  record_purchase vip "$weeks" "$actual_cost"
-  log "VIP purchased/extended by ${weeks} week(s)."
+  if [[ "$actual_cost" -lt 0 && "$option" != "max" ]]; then
+    actual_cost="$cost"
+  elif [[ "$actual_cost" -lt 0 ]]; then
+    actual_cost=0
+  fi
+  record_purchase vip "$option" "$actual_cost"
+  log "VIP purchased/extended: duration=${option}."
   printf '%s\n' "$refreshed_points"
 }
 
