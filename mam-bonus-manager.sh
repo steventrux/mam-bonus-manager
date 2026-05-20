@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.2.1"
+VERSION="1.2.2"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
@@ -497,9 +497,21 @@ manual_vip_step() {
   log "Manual step 1/3 - VIP"
   log "Current points: ${points}. VIP options are 4, 8, 12 weeks, or max. Cost is ${VIP_BLOCK_COST} points per 4-week block."
   log "Purchasable VIP durations with the current balance:"
-  [[ "$points" -ge "$VIP_BLOCK_COST" ]] && log " - 4 weeks: available, cost ${VIP_BLOCK_COST} points." || log " - 4 weeks: unavailable, requires ${VIP_BLOCK_COST} points."
-  [[ "$points" -ge $((VIP_BLOCK_COST * 2)) ]] && log " - 8 weeks: available, cost $((VIP_BLOCK_COST * 2)) points." || log " - 8 weeks: unavailable, requires $((VIP_BLOCK_COST * 2)) points."
-  [[ "$points" -ge $((VIP_BLOCK_COST * 3)) ]] && log " - 12 weeks: available, cost $((VIP_BLOCK_COST * 3)) points." || log " - 12 weeks: unavailable, requires $((VIP_BLOCK_COST * 3)) points."
+  if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
+    log " - 4 weeks: available, cost ${VIP_BLOCK_COST} points."
+  else
+    log " - 4 weeks: unavailable, requires ${VIP_BLOCK_COST} points."
+  fi
+  if [[ "$points" -ge $((VIP_BLOCK_COST * 2)) ]]; then
+    log " - 8 weeks: available, cost $((VIP_BLOCK_COST * 2)) points."
+  else
+    log " - 8 weeks: unavailable, requires $((VIP_BLOCK_COST * 2)) points."
+  fi
+  if [[ "$points" -ge $((VIP_BLOCK_COST * 3)) ]]; then
+    log " - 12 weeks: available, cost $((VIP_BLOCK_COST * 3)) points."
+  else
+    log " - 12 weeks: unavailable, requires $((VIP_BLOCK_COST * 3)) points."
+  fi
   if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
     log " - max: available; the API will buy the maximum valid duration up to the 90-day limit."
     max_suffix=", max"
@@ -517,7 +529,7 @@ manual_vip_step() {
         return 0
         ;;
       4|8|12)
-        cost=$((option / 4 * VIP_BLOCK_COST))
+        cost=$((option * VIP_BLOCK_COST / 4))
         if [[ "$points" -lt "$cost" ]]; then
           warn "Not enough points for ${option} weeks. Required: ${cost}."
           continue
