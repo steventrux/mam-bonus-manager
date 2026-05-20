@@ -62,7 +62,8 @@ load_config() {
   : "${CURL_TIMEOUT:=30}"
   : "${CURL_RETRIES:=3}"
   : "${USER_AGENT:=Mozilla/5.0 mam-bonus-manager/${VERSION}}"
-  : "${UPLOAD_PACKS:=100 20 5 1}"
+  : "${MIN_UPLOAD_GB:=50}"
+  : "${UPLOAD_PACKS:=100 50}"
 
   BASE_URL="https://www.myanonamouse.net"
   COOKIE_FILE="${WORKDIR}/MAM.cookies"
@@ -204,9 +205,17 @@ buy_vip_if_enabled() {
 }
 
 buy_upload_until_buffer() {
-  local points="$1" pack required now response new_points
+  local points="$1" pack required now response new_points error_message
+  [[ "$MIN_UPLOAD_GB" =~ ^[0-9]+$ ]] || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
+
   for pack in $UPLOAD_PACKS; do
     [[ "$pack" =~ ^[0-9]+$ ]] || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
+
+    if [[ "$pack" -lt "$MIN_UPLOAD_GB" ]]; then
+      log "Skipping ${pack}GB upload package because automated purchases require at least ${MIN_UPLOAD_GB}GB."
+      continue
+    fi
+
     required=$((pack * 500 + BUFFER))
     log "Checking ${pack}GB upload package. Purchase threshold: > ${required} points."
 
@@ -220,8 +229,9 @@ buy_upload_until_buffer() {
 
       now="$(date +%s%3N)"
       response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${pack}&_=${now}")" || fatal "Upload purchase failed for ${pack}GB: curl/API error."
+      error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
       new_points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
-      valid_number "$new_points" || fatal "Upload purchase could not be verified. Response: $response"
+      valid_number "$new_points" || fatal "Upload purchase could not be verified for ${pack}GB. API error: ${error_message:-none}. Response: $response"
       new_points="$(int_part "$new_points")"
 
       if [[ "$new_points" -lt "$points" ]]; then
