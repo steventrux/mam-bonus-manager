@@ -1,0 +1,18 @@
+# Configurazione reale con MAM_ID
+config.env
+*.env
+!/config/config.env.example
+
+# Cookie e stato runtime
+MAM.cookies
+MAM.json
+wedge.last
+*.lock
+
+# Log locali
+*.log
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
