@@ -61,6 +61,7 @@ load_config() {
   : "${WEDGE_RESERVE_AFTER:=5000}"
   : "${CURL_TIMEOUT:=30}"
   : "${CURL_RETRIES:=3}"
+  : "${USER_AGENT:=Mozilla/5.0 mam-bonus-manager/${VERSION}}"
   : "${UPLOAD_PACKS:=100 20 5 1}"
 
   BASE_URL="https://www.myanonamouse.net"
@@ -86,13 +87,13 @@ check_dependencies() {
 json_get() {
   local url="$1"
   curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
-    -b "$COOKIE_FILE" -c "$COOKIE_FILE" "$url"
+    -A "$USER_AGENT" -b "$COOKIE_FILE" -c "$COOKIE_FILE" "$url"
 }
 
 json_get_with_mamid() {
   local url="$1"
   curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
-    -b "mam_id=${MAM_ID}" -c "$COOKIE_FILE" "$url"
+    -A "$USER_AGENT" -b "mam_id=${MAM_ID}" -c "$COOKIE_FILE" "$url"
 }
 
 valid_number() {
@@ -105,7 +106,7 @@ int_part() {
 
 get_uid_from_summary() {
   local response uid
-  response="$(json_get "${BASE_URL}/jsonLoad.php?snatch_summary")" || return 1
+  response="$(json_get "${BASE_URL}/jsonLoad.php?snatch_summary" 2>/dev/null)" || return 1
   printf '%s' "$response" > "$JSON_FILE"
   uid="$(jq -r '.uid // empty' < "$JSON_FILE" 2>/dev/null || true)"
   [[ -n "$uid" && "$uid" != "null" ]] || return 1
