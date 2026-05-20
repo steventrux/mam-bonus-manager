@@ -52,6 +52,7 @@ Main variables:
 | `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables wedges |
 | `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after a wedge purchase |
 | `UPLOAD_PACKS` | `100 20 5 1` | upload credit package sizes to buy, in GB |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.0.0` | User-Agent sent by curl |
 
 ## Usage
 
@@ -67,6 +68,35 @@ Use an alternate config file:
 ```bash
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
 ```
+
+## Local dry-run test
+
+Use this workflow to test the script locally, including on a Chromebook Linux container, without writing to `/etc` or `/opt`.
+
+```bash
+cp config/config.env.example ./config.env
+chmod 600 ./config.env
+mkdir -p .mam-workdir
+```
+
+Edit `./config.env`:
+
+```bash
+MAM_ID="your_real_mam_id"
+WORKDIR="$PWD/.mam-workdir"
+VIP=0
+WEDGE_HOURS=0
+```
+
+Then run:
+
+```bash
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh check-session
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh points
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
+```
+
+With `VIP=0` and `WEDGE_HOURS=0`, the script will not buy VIP or wedges. With the default `BUFFER=55000`, it will only buy upload credit if your bonus balance is above the configured thresholds.
 
 ## Systemd timer
 
