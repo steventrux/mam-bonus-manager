@@ -12,6 +12,7 @@ It can:
 - keep a configurable points buffer untouched;
 - prevent concurrent runs with `flock`;
 - run safely in `--dry-run` mode;
+- provide an interactive manual mode for one-off purchases;
 - keep secrets and cookies outside the repository.
 
 ## Quick start
@@ -48,19 +49,36 @@ Main variables:
 | `MAM_ID` | required | value of the `mam_id` cookie |
 | `WORKDIR` | `/opt/MAM` | working directory for cookies, lock file and state files |
 | `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit |
-| `VIP` | `0` | set to `1` to enable VIP purchase/extension |
-| `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables wedges |
-| `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after a wedge purchase |
-| `UPLOAD_PACKS` | `100 20 5 1` | upload credit package sizes to buy, in GB |
+| `VIP` | `0` | set to `1` to enable automated VIP purchase/extension |
+| `VIP_WEEK_COST` | `5000` | VIP cost per week, used by interactive mode |
+| `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables automated wedges |
+| `WEDGE_COST` | `50000` | wedge cost in bonus points |
+| `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after automated or manual wedge purchases |
+| `MIN_UPLOAD_GB` | `50` | minimum upload package size allowed for automated API purchases |
+| `UPLOAD_PACKS` | `100 50` | upload credit package sizes to buy, in GB |
 | `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.0.0` | User-Agent sent by curl |
 
 ## Usage
 
+Automated mode, suitable for cron or systemd:
+
 ```bash
 ./mam-bonus-manager.sh --dry-run
 ./mam-bonus-manager.sh run
+```
+
+Utility commands:
+
+```bash
 ./mam-bonus-manager.sh check-session
 ./mam-bonus-manager.sh points
+```
+
+Interactive manual mode:
+
+```bash
+./mam-bonus-manager.sh --dry-run manual
+./mam-bonus-manager.sh manual
 ```
 
 Use an alternate config file:
@@ -68,6 +86,26 @@ Use an alternate config file:
 ```bash
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
 ```
+
+## Interactive manual mode
+
+Manual mode is intended for one-off runs from a terminal. It does not replace the automated `run` command used by cron or systemd.
+
+It proceeds in three steps:
+
+1. VIP purchase/extension;
+2. wedge purchase;
+3. upload credit purchase.
+
+Before each step, the script prints the current points, the relevant cost and the maximum quantity currently purchasable. You can enter `0` or press Enter to skip a step.
+
+Example safe test:
+
+```bash
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
+```
+
+In `--dry-run` mode, no purchase is sent to MAM. The script only estimates the point balance after each selected step.
 
 ## Local dry-run test
 
@@ -94,9 +132,10 @@ Then run:
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh check-session
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh points
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
 ```
 
-With `VIP=0` and `WEDGE_HOURS=0`, the script will not buy VIP or wedges. With the default `BUFFER=55000`, it will only buy upload credit if your bonus balance is above the configured thresholds.
+With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, it will only buy upload credit if your bonus balance is above the configured thresholds.
 
 ## Systemd timer
 
@@ -127,6 +166,8 @@ journalctl -u mam-bonus-manager.service -n 100 --no-pager
 - A lock file prevents overlapping runs.
 - `--dry-run` shows planned purchases without spending points.
 - `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
+- Automated upload purchases respect MAM's current minimum package size.
+- Interactive mode supports controlled one-off VIP, wedge and upload purchases.
 - The script is function-based and easier to read and maintain.
 
 ## Safety notes
