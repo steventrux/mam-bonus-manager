@@ -9,7 +9,7 @@ It can:
 - buy wedges at a configurable interval;
 - optionally buy or extend VIP;
 - buy upload credit in configurable package sizes;
-- keep a configurable points buffer untouched;
+- keep a configurable points buffer untouched in automated mode;
 - prevent concurrent runs with `flock`;
 - run safely in `--dry-run` mode;
 - provide an interactive manual mode for one-off purchases;
@@ -48,7 +48,7 @@ Main variables:
 | --- | ---: | --- |
 | `MAM_ID` | required | value of the `mam_id` cookie |
 | `WORKDIR` | `/opt/MAM` | working directory for cookies, lock file and state files |
-| `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit |
+| `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit in automated mode |
 | `VIP` | `0` | set to `1` to enable automated VIP purchase/extension |
 | `VIP_WEEK_COST` | `5000` | VIP cost per week, used by interactive mode |
 | `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables automated wedges |
@@ -99,6 +99,8 @@ It proceeds in three steps:
 
 Before each step, the script prints the current points, the relevant cost and the maximum quantity currently purchasable. You can enter `0` or press Enter to skip a step.
 
+Manual mode does **not** apply the automated `BUFFER` to VIP or upload purchases. It only prevents you from selecting more than your current balance can buy. Wedges still respect `WEDGE_RESERVE_AFTER`, because that setting is specific to wedge safety.
+
 Example safe test:
 
 ```bash
@@ -135,7 +137,7 @@ MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
 ```
 
-With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, it will only buy upload credit if your bonus balance is above the configured thresholds.
+With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, automated upload purchases only happen if your bonus balance is above the configured thresholds. Manual mode ignores that automated buffer and asks before every selected purchase.
 
 ## Systemd timer
 
