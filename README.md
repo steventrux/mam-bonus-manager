@@ -71,7 +71,7 @@ MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
 
 ## Local dry-run test
 
-Use this workflow to test the script locally, including on a Chromebook Linux container, without writing to `/etc` or `/opt`.
+Use this workflow to test the script locally on any Linux-like environment without writing to `/etc` or `/opt`.
 
 ```bash
 cp config/config.env.example ./config.env
