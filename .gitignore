@@ -1,15 +1,16 @@
-# Configurazione reale con MAM_ID
+# Real configuration containing MAM_ID
 config.env
 *.env
 !/config/config.env.example
 
-# Cookie e stato runtime
+# Runtime cookies and state
 MAM.cookies
 MAM.json
 wedge.last
 *.lock
+.mam-workdir/
 
-# Log locali
+# Local logs
 *.log
 
 # Editor / OS
