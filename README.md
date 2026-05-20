@@ -6,9 +6,10 @@ It can:
 
 - validate or recreate the MAM session using `MAM_ID`;
 - read the current seedbonus balance;
-- buy wedges at a configurable interval;
 - optionally buy or extend VIP;
+- buy wedges at a configurable interval;
 - buy upload credit in configurable package sizes;
+- refresh the bonus balance after each automated purchase step;
 - keep a configurable points buffer untouched in automated mode;
 - prevent concurrent runs with `flock`;
 - run safely in `--dry-run` mode;
@@ -66,6 +67,14 @@ Automated mode, suitable for cron or systemd:
 ./mam-bonus-manager.sh --dry-run
 ./mam-bonus-manager.sh run
 ```
+
+In automated mode, purchases are processed in this order:
+
+1. VIP purchase/extension;
+2. wedge purchase;
+3. upload credit purchase.
+
+After each real purchase step, the script refreshes the bonus balance from MAM before moving to the next step. In `--dry-run` mode, no purchase is sent to MAM and the script only estimates or reports the planned actions.
 
 Utility commands:
 
@@ -169,6 +178,7 @@ journalctl -u mam-bonus-manager.service -n 100 --no-pager
 - `--dry-run` shows planned purchases without spending points.
 - `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
 - Automated upload purchases respect MAM's current minimum package size.
+- Automated mode runs in VIP → wedge → upload order and refreshes points after each purchase step.
 - Interactive mode supports controlled one-off VIP, wedge and upload purchases.
 - The script is function-based and easier to read and maintain.
 
