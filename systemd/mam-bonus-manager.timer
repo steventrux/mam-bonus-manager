@@ -1,0 +1,13 @@
+[Unit]
+Description=Run MAM bonus manager periodically
+
+[Timer]
+# Prima esecuzione 5 minuti dopo il boot, poi ogni ora.
+# Lo script compra wedge solo se sono passate WEDGE_HOURS ore.
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=mam-bonus-manager.service
+
+[Install]
+WantedBy=timers.target
