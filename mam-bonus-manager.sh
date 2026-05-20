@@ -18,7 +18,7 @@ Usage:
   ./mam-bonus-manager.sh [options] [command]
 
 Commands:
-  run             Run the automated cycle: session, wedge, VIP, upload credit. Default.
+  run             Run the automated cycle: session, VIP, wedge, upload credit. Default.
   manual          Interactive manual mode: choose VIP, wedges and upload credit step by step.
   interactive     Alias of manual.
   check-session   Validate or recreate the MAM session only.
@@ -179,8 +179,37 @@ get_points() {
   int_part "$points"
 }
 
+buy_vip_if_enabled() {
+  local points="$1" now result success refreshed_points
+  [[ "$VIP" == "1" || "$VIP" == "true" || "$VIP" == "yes" ]] || { printf '%s\n' "$points"; return 0; }
+
+  log "VIP is enabled: trying to maximize duration."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY-RUN: would buy VIP duration=max. Points are left unchanged because the real API decides the final cost."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
+  now="$(date +%s%3N)"
+  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=max&_=${now}")" || {
+    warn "VIP purchase failed: curl/API error."
+    printf '%s\n' "$points"
+    return 0
+  }
+  success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
+  if [[ "$success" == "true" ]]; then
+    log "VIP purchased/extended. Refreshing points."
+    refreshed_points="$(get_points "$MAM_UID")"
+    log "Points after VIP step: ${refreshed_points}"
+    printf '%s\n' "$refreshed_points"
+  else
+    warn "VIP purchase was not confirmed: $result"
+    printf '%s\n' "$points"
+  fi
+}
+
 buy_wedge_if_needed() {
-  local points="$1" now mins min_points result success
+  local points="$1" now mins min_points result success refreshed_points
 
   [[ "$WEDGE_HOURS" -gt 0 ]] || { printf '%s\n' "$points"; return 0; }
 
@@ -212,32 +241,14 @@ buy_wedge_if_needed() {
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
   [[ "$success" == "true" ]] || warn "Wedge response does not report success=true: $result"
   touch "$WEDGE_STATE_FILE"
-  log "Wedge purchased."
-  printf '%s\n' "$(get_points "$MAM_UID")"
-}
-
-buy_vip_if_enabled() {
-  local now result success
-  [[ "$VIP" == "1" || "$VIP" == "true" || "$VIP" == "yes" ]] || return 0
-
-  log "VIP is enabled: trying to maximize duration."
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY-RUN: would buy VIP duration=max."
-    return 0
-  fi
-
-  now="$(date +%s%3N)"
-  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=max&_=${now}")" || { warn "VIP purchase failed: curl/API error."; return 0; }
-  success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
-  if [[ "$success" == "true" ]]; then
-    log "VIP purchased/extended."
-  else
-    warn "VIP purchase was not confirmed: $result"
-  fi
+  log "Wedge purchased. Refreshing points."
+  refreshed_points="$(get_points "$MAM_UID")"
+  log "Points after wedge step: ${refreshed_points}"
+  printf '%s\n' "$refreshed_points"
 }
 
 buy_upload_until_buffer() {
-  local points="$1" pack required now response new_points error_message
+  local points="$1" pack required now response new_points error_message refreshed_points
   [[ "$MIN_UPLOAD_GB" =~ ^[0-9]+$ ]] || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
 
   for pack in $UPLOAD_PACKS; do
@@ -268,13 +279,21 @@ buy_upload_until_buffer() {
 
       if [[ "$new_points" -lt "$points" ]]; then
         points="$new_points"
-        log "Purchase completed. Remaining points: ${points}."
+        log "Purchase completed. Remaining points reported by API: ${points}."
       else
         fatal "Points did not decrease after the purchase. Before=${points}, After=${new_points}."
       fi
     done
   done
-  printf '%s\n' "$points"
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    log "Refreshing points after upload step."
+    refreshed_points="$(get_points "$MAM_UID")"
+    log "Points after upload step: ${refreshed_points}"
+    printf '%s\n' "$refreshed_points"
+  else
+    printf '%s\n' "$points"
+  fi
 }
 
 manual_vip_step() {
@@ -428,9 +447,12 @@ run_main() {
     return 0
   fi
 
+  POINTS="$(buy_vip_if_enabled "$POINTS" | tail -n1)"
+  log "Automated balance after VIP step: ${POINTS}"
   POINTS="$(buy_wedge_if_needed "$POINTS" | tail -n1)"
-  buy_vip_if_enabled
+  log "Automated balance after wedge step: ${POINTS}"
   POINTS="$(buy_upload_until_buffer "$POINTS" | tail -n1)"
+  log "Automated balance after upload step: ${POINTS}"
   log "Done. Final estimated/current points: ${POINTS}"
 }
 
