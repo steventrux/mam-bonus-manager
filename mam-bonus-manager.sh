@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
@@ -18,7 +18,9 @@ Usage:
   ./mam-bonus-manager.sh [options] [command]
 
 Commands:
-  run             Run the full cycle: session, wedge, VIP, upload credit. Default.
+  run             Run the automated cycle: session, wedge, VIP, upload credit. Default.
+  manual          Interactive manual mode: choose VIP, wedges and upload credit step by step.
+  interactive     Alias of manual.
   check-session   Validate or recreate the MAM session only.
   points          Show the current seedbonus balance only.
   help            Show this help message.
@@ -30,6 +32,7 @@ Options:
 
 Examples:
   ./mam-bonus-manager.sh --dry-run
+  ./mam-bonus-manager.sh --dry-run manual
   MAM_CONFIG=./config.env ./mam-bonus-manager.sh run
 USAGE
 }
@@ -41,7 +44,7 @@ parse_args() {
       --dry-run) DRY_RUN=1; shift ;;
       --version) echo "$VERSION"; exit 0 ;;
       -h|--help|help) COMMAND="help"; shift ;;
-      run|check-session|points) COMMAND="$1"; shift ;;
+      run|manual|interactive|check-session|points) COMMAND="$1"; shift ;;
       *) fatal "Unknown argument: $1" ;;
     esac
   done
@@ -56,6 +59,7 @@ load_config() {
   : "${WORKDIR:=/opt/MAM}"
   : "${BUFFER:=55000}"
   : "${VIP:=0}"
+  : "${VIP_WEEK_COST:=5000}"
   : "${WEDGE_HOURS:=4}"
   : "${WEDGE_COST:=50000}"
   : "${WEDGE_RESERVE_AFTER:=5000}"
@@ -101,8 +105,36 @@ valid_number() {
   [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+valid_integer() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
 int_part() {
   printf '%s\n' "$1" | sed -E 's/\..*$//'
+}
+
+ask_integer() {
+  local prompt="$1"
+  local max_value="$2"
+  local answer
+
+  while true; do
+    read -r -p "$prompt" answer || answer=""
+    answer="${answer:-0}"
+
+    if ! valid_integer "$answer"; then
+      warn "Please enter a number between 0 and ${max_value}."
+      continue
+    fi
+
+    if [[ "$answer" -gt "$max_value" ]]; then
+      warn "Maximum allowed value is ${max_value}."
+      continue
+    fi
+
+    printf '%s\n' "$answer"
+    return 0
+  done
 }
 
 get_uid_from_summary() {
@@ -245,6 +277,140 @@ buy_upload_until_buffer() {
   printf '%s\n' "$points"
 }
 
+manual_vip_step() {
+  local points="$1" spendable max_weeks weeks cost now result success error_message
+  valid_integer "$VIP_WEEK_COST" || fatal "VIP_WEEK_COST must be numeric: $VIP_WEEK_COST"
+
+  log "Manual step 1/3 - VIP"
+  spendable=0
+  [[ "$points" -gt "$BUFFER" ]] && spendable=$((points - BUFFER))
+  max_weeks=$((spendable / VIP_WEEK_COST))
+  log "Current points: ${points}. Buffer: ${BUFFER}. VIP cost: ${VIP_WEEK_COST} points/week. Purchasable VIP weeks: ${max_weeks}."
+
+  weeks="$(ask_integer "Buy how many VIP weeks? [0-${max_weeks}, Enter=0]: " "$max_weeks")"
+  [[ "$weeks" -eq 0 ]] && { log "VIP skipped."; printf '%s\n' "$points"; return 0; }
+
+  cost=$((weeks * VIP_WEEK_COST))
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY-RUN: would buy ${weeks} VIP week(s). Estimated cost: ${cost} points."
+    printf '%s\n' "$((points - cost))"
+    return 0
+  fi
+
+  now="$(date +%s%3N)"
+  result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=VIP&duration=${weeks}&_=${now}")" || fatal "VIP purchase failed: curl/API error."
+  error_message="$(jq -r '.error // empty' <<< "$result" 2>/dev/null || true)"
+  success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
+  [[ "$success" == "true" ]] || fatal "VIP purchase was not confirmed. API error: ${error_message:-none}. Response: $result"
+  log "VIP purchased/extended by ${weeks} week(s)."
+  printf '%s\n' "$(get_points "$MAM_UID")"
+}
+
+manual_wedge_step() {
+  local points="$1" spendable max_wedges count i now result success error_message estimated_cost
+  valid_integer "$WEDGE_COST" || fatal "WEDGE_COST must be numeric: $WEDGE_COST"
+  valid_integer "$WEDGE_RESERVE_AFTER" || fatal "WEDGE_RESERVE_AFTER must be numeric: $WEDGE_RESERVE_AFTER"
+
+  log "Manual step 2/3 - Wedges"
+  spendable=0
+  [[ "$points" -gt "$WEDGE_RESERVE_AFTER" ]] && spendable=$((points - WEDGE_RESERVE_AFTER))
+  max_wedges=$((spendable / WEDGE_COST))
+  log "Current points: ${points}. Wedge cost: ${WEDGE_COST}. Reserve after wedge purchases: ${WEDGE_RESERVE_AFTER}. Purchasable wedges: ${max_wedges}."
+
+  count="$(ask_integer "Buy how many wedge(s)? [0-${max_wedges}, Enter=0]: " "$max_wedges")"
+  [[ "$count" -eq 0 ]] && { log "Wedges skipped."; printf '%s\n' "$points"; return 0; }
+
+  estimated_cost=$((count * WEDGE_COST))
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY-RUN: would buy ${count} wedge(s). Estimated cost: ${estimated_cost} points."
+    printf '%s\n' "$((points - estimated_cost))"
+    return 0
+  fi
+
+  for ((i = 1; i <= count; i++)); do
+    now="$(date +%s%3N)"
+    result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=wedges&source=points&_=${now}")" || fatal "Wedge purchase ${i}/${count} failed: curl/API error."
+    error_message="$(jq -r '.error // empty' <<< "$result" 2>/dev/null || true)"
+    success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
+    [[ "$success" == "true" ]] || fatal "Wedge purchase ${i}/${count} was not confirmed. API error: ${error_message:-none}. Response: $result"
+    log "Wedge ${i}/${count} purchased."
+  done
+  touch "$WEDGE_STATE_FILE"
+  printf '%s\n' "$(get_points "$MAM_UID")"
+}
+
+manual_upload_step() {
+  local points="$1" pack spendable pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost
+  valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
+
+  log "Manual step 3/3 - Upload credit"
+  spendable=0
+  [[ "$points" -gt "$BUFFER" ]] && spendable=$((points - BUFFER))
+  log "Current points: ${points}. Buffer: ${BUFFER}. Automated upload minimum: ${MIN_UPLOAD_GB}GB."
+  log "Purchasable upload packages with the current buffer:"
+
+  for pack in $UPLOAD_PACKS; do
+    valid_integer "$pack" || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
+    if [[ "$pack" -lt "$MIN_UPLOAD_GB" ]]; then
+      log " - ${pack}GB: unavailable for automated purchases, below ${MIN_UPLOAD_GB}GB minimum."
+      continue
+    fi
+    pack_cost=$((pack * 500))
+    max_count=$((spendable / pack_cost))
+    log " - ${pack}GB: up to ${max_count} purchase(s), ${pack_cost} points each."
+  done
+
+  read -r -p "Choose upload package size in GB [0 to skip]: " chosen_pack || chosen_pack="0"
+  chosen_pack="${chosen_pack:-0}"
+  [[ "$chosen_pack" == "0" ]] && { log "Upload credit skipped."; printf '%s\n' "$points"; return 0; }
+  valid_integer "$chosen_pack" || fatal "Upload package size must be numeric."
+
+  for pack in $UPLOAD_PACKS; do
+    if [[ "$pack" == "$chosen_pack" && "$pack" -ge "$MIN_UPLOAD_GB" ]]; then
+      allowed_package=1
+      break
+    fi
+  done
+  [[ "$allowed_package" -eq 1 ]] || fatal "Upload package ${chosen_pack}GB is not allowed. Allowed automated packages: ${UPLOAD_PACKS}; minimum: ${MIN_UPLOAD_GB}GB."
+
+  pack_cost=$((chosen_pack * 500))
+  max_count=$((spendable / pack_cost))
+  chosen_count="$(ask_integer "Buy how many ${chosen_pack}GB upload package(s)? [0-${max_count}, Enter=0]: " "$max_count")"
+  [[ "$chosen_count" -eq 0 ]] && { log "Upload credit skipped."; printf '%s\n' "$points"; return 0; }
+
+  estimated_cost=$((chosen_count * pack_cost))
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY-RUN: would buy ${chosen_count} x ${chosen_pack}GB upload package(s). Estimated cost: ${estimated_cost} points."
+    printf '%s\n' "$((points - estimated_cost))"
+    return 0
+  fi
+
+  for ((i = 1; i <= chosen_count; i++)); do
+    now="$(date +%s%3N)"
+    response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${chosen_pack}&_=${now}")" || fatal "Upload purchase ${i}/${chosen_count} failed for ${chosen_pack}GB: curl/API error."
+    error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+    new_points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
+    valid_number "$new_points" || fatal "Upload purchase ${i}/${chosen_count} could not be verified. API error: ${error_message:-none}. Response: $response"
+    new_points="$(int_part "$new_points")"
+    log "Upload purchase ${i}/${chosen_count} completed. Remaining points reported by API: ${new_points}."
+  done
+  printf '%s\n' "$(get_points "$MAM_UID")"
+}
+
+run_manual_mode() {
+  local points="$1"
+  log "Interactive manual mode started. Each step shows the currently purchasable quantity before asking for input."
+  [[ "$DRY_RUN" -eq 1 ]] && log "DRY-RUN is enabled: no purchase will be sent to MAM."
+
+  points="$(manual_vip_step "$points" | tail -n1)"
+  log "Points after VIP step: ${points}"
+  points="$(manual_wedge_step "$points" | tail -n1)"
+  log "Points after wedge step: ${points}"
+  points="$(manual_upload_step "$points" | tail -n1)"
+  log "Points after upload step: ${points}"
+  log "Interactive manual mode completed. Final estimated/current points: ${points}"
+}
+
 run_main() {
   check_dependencies
   load_config
@@ -259,6 +425,11 @@ run_main() {
   POINTS="$(get_points "$MAM_UID")"
   log "Current points: ${POINTS}"
   [[ "$COMMAND" == "points" ]] && return 0
+
+  if [[ "$COMMAND" == "manual" || "$COMMAND" == "interactive" ]]; then
+    run_manual_mode "$POINTS"
+    return 0
+  fi
 
   POINTS="$(buy_wedge_if_needed "$POINTS" | tail -n1)"
   buy_vip_if_enabled
