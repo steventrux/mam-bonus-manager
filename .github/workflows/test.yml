@@ -1,0 +1,41 @@
+name: Test Bash script
+
+on:
+  push:
+    branches:
+      - main
+      - docker-ghcr
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Bash syntax check
+        run: bash -n mam-bonus-manager.sh
+
+      - name: ShellCheck
+        run: shellcheck mam-bonus-manager.sh
+
+      - name: Docker build test
+        run: docker build -t mam-bonus-manager:test .
+
+      - name: Docker version test
+        run: docker run --rm mam-bonus-manager:test --version
+
+      - name: Docker help test
+        run: |
+          mkdir -p test-config test-data
+          cp config/config.env.example test-config/config.env
+          sed -i 's|WORKDIR="/opt/MAM"|WORKDIR="/data"|' test-config/config.env
+          docker run --rm \
+            -v "$PWD/test-config:/config" \
+            -v "$PWD/test-data:/data" \
+            mam-bonus-manager:test help
