@@ -6,7 +6,7 @@ It can:
 
 - validate or recreate the MAM session using `MAM_ID` or `MAM_ID_FILE`;
 - read the current seedbonus balance;
-- optionally buy or extend VIP only when needed;
+- optionally buy or extend VIP only when needed and only for eligible account classes;
 - buy wedges at a configurable interval;
 - buy upload credit in configurable package sizes;
 - refresh the bonus balance after each automated purchase step;
@@ -66,7 +66,7 @@ Main variables:
 | `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after automated or manual wedge purchases |
 | `MIN_UPLOAD_GB` | `50` | minimum upload package size allowed for automated API purchases |
 | `UPLOAD_PACKS` | `100 50` | upload credit package sizes to buy, in GB |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.2` | User-Agent sent by curl |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.3` | User-Agent sent by curl |
 | `HEARTBEAT_URL` | empty | optional HTTP heartbeat URL |
 | `TELEGRAM_DAILY_SUMMARY` | `0` | set to `1` to enable daily Telegram purchase summaries |
 | `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token |
@@ -89,7 +89,9 @@ In automated mode, purchases are processed in this order:
 2. wedge purchase;
 3. upload credit purchase.
 
-VIP is purchased only if `VIP=1` and either the account is not currently VIP or VIP expires within `VIP_THRESHOLD_WEEKS`. After each real purchase step, the script refreshes the bonus balance from MAM before moving to the next step. In `--dry-run` mode, no purchase is sent to MAM and the script only estimates or reports the planned actions.
+VIP is purchased only if `VIP=1` and the account class reported by `jsonLoad.php?snatch_summary` is eligible. Eligible classes are `Power User` and `VIP`. If the account is already VIP, the script also checks `vip_until` and buys only when the expiration date is within `VIP_THRESHOLD_WEEKS`. Other classes skip the VIP step and continue with wedge/upload checks.
+
+After each real purchase step, the script refreshes the bonus balance from MAM before moving to the next step. In `--dry-run` mode, no purchase is sent to MAM and the script only estimates or reports the planned actions.
 
 Utility commands:
 
@@ -123,7 +125,7 @@ It proceeds in three steps:
 
 Before each step, the script prints the current points, the relevant cost and the maximum quantity currently purchasable. You can enter `0` or press Enter to skip a step.
 
-Manual VIP accepts only the documented durations: `4`, `8`, `12`, or `max`. The default cost is `5000` points per 4-week block, so `4` costs 5000 points, `8` costs 10000 points, and `12` costs 15000 points. The `max` option lets the API decide the maximum valid duration.
+Manual VIP is shown only for eligible account classes: `Power User` and `VIP`. It accepts only the documented durations: `4`, `8`, `12`, or `max`. The default cost is `5000` points per 4-week block, so `4` costs 5000 points, `8` costs 10000 points, and `12` costs 15000 points. The `max` option lets the API decide the maximum valid duration.
 
 Manual mode does **not** apply the automated `BUFFER` to VIP or upload purchases. It only prevents you from selecting more than your current balance can buy. Wedges still respect `WEDGE_RESERVE_AFTER`, because that setting is specific to wedge safety.
 
@@ -151,8 +153,8 @@ Telegram summaries are optional and disabled by default. When enabled, the scrip
 
 ```bash
 TELEGRAM_DAILY_SUMMARY=1
-TELEGRAM_BOT_TOKEN="123456:ABCDEF..."
-TELEGRAM_CHAT_ID="123456789"
+TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
+TELEGRAM_CHAT_ID="your_telegram_chat_id"
 ```
 
 The summary includes total VIP purchases, wedges, upload credit and points spent for the day. No Telegram message is sent if there were no purchases for the summarized date.
@@ -219,8 +221,8 @@ journalctl -u mam-bonus-manager.service -n 100 --no-pager
 - `--dry-run` shows planned purchases without spending points.
 - `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
 - Automated upload purchases respect MAM's current minimum package size.
-- Automated mode runs in VIP → wedge → upload order and refreshes points after each purchase step.
-- Automated VIP purchase is skipped when VIP is already valid beyond the configured threshold.
+- Automated mode runs in VIP -> wedge -> upload order and refreshes points after each purchase step.
+- Automated VIP purchase is skipped for non-eligible account classes and when VIP is already valid beyond the configured threshold.
 - Interactive mode supports controlled one-off VIP, wedge and upload purchases.
 - Optional heartbeat and Telegram daily summary notifications are supported.
 - The script is function-based and easier to read and maintain.
