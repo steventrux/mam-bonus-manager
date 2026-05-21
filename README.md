@@ -189,6 +189,26 @@ MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
 
 With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, automated upload purchases only happen if your bonus balance is above the configured thresholds. Manual mode ignores that automated buffer and asks before every selected purchase.
 
+## Docker
+
+Docker is an alternative to the classic Linux/systemd installation. The existing Linux/systemd setup remains fully supported.
+
+- The container does not expose ports.
+- Configuration is read from `/config/config.env`.
+- `/data` is the persistent `WORKDIR` for cookies, lock files, runtime state, and purchase history.
+- With Docker, set `WORKDIR="/data"` in `config.env`.
+- You can run it with Docker Compose using the provided `compose.yml`.
+
+One-off manual commands are supported:
+
+```bash
+docker run --rm ghcr.io/steventrux/mam-bonus-manager:latest --version
+docker run --rm -it -v "$PWD/docker-config:/config" -v "$PWD/docker-data:/data" ghcr.io/steventrux/mam-bonus-manager:latest --dry-run run
+docker run --rm -it -v "$PWD/docker-config:/config" -v "$PWD/docker-data:/data" ghcr.io/steventrux/mam-bonus-manager:latest --dry-run manual
+```
+
+For production usage, prefer versioned image tags once releases are available.
+
 ## Systemd timer
 
 ```bash
