@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.2.2"
+VERSION="1.2.3"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
@@ -77,6 +77,14 @@ parse_args() {
 
 truthy() {
   [[ "$1" == "1" || "$1" == "true" || "$1" == "yes" || "$1" == "on" ]]
+}
+
+vip_purchase_allowed() {
+  local class_name="$1"
+  case "$class_name" in
+    VIP|"Power User") return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 load_config() {
@@ -331,8 +339,13 @@ should_buy_vip() {
   current_class="$(jq -r '.classname // empty' < "$JSON_FILE" 2>/dev/null || true)"
   vip_until="$(jq -r '.vip_until // empty' < "$JSON_FILE" 2>/dev/null || true)"
 
+  if ! vip_purchase_allowed "$current_class"; then
+    log "VIP step skipped for current class '${current_class:-unknown}'."
+    return 1
+  fi
+
   if [[ "$current_class" != "VIP" ]]; then
-    log "Current class is '${current_class:-unknown}', so VIP purchase is eligible."
+    log "Current class can buy VIP; purchase is eligible."
     return 0
   fi
 
@@ -490,12 +503,24 @@ buy_upload_until_buffer() {
 }
 
 manual_vip_step() {
-  local points="$1" option cost now result success error_message before refreshed_points actual_cost
+  local points="$1" option cost now result success error_message before refreshed_points actual_cost current_class
   local max_suffix=""
   valid_integer "$VIP_BLOCK_COST" || fatal "VIP_BLOCK_COST must be numeric: $VIP_BLOCK_COST"
 
+  refresh_user_summary || {
+    warn "Could not refresh user summary before VIP step; skipping VIP purchase."
+    printf '%s\n' "$points"
+    return 0
+  }
+  current_class="$(jq -r '.classname // empty' < "$JSON_FILE" 2>/dev/null || true)"
+  if ! vip_purchase_allowed "$current_class"; then
+    log "Manual VIP step skipped for current class '${current_class:-unknown}'."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
   log "Manual step 1/3 - VIP"
-  log "Current points: ${points}. VIP options are 4, 8, 12 weeks, or max. Cost is ${VIP_BLOCK_COST} points per 4-week block."
+  log "Current class: ${current_class}. Current points: ${points}. VIP options are 4, 8, 12 weeks, or max. Cost is ${VIP_BLOCK_COST} points per 4-week block."
   log "Purchasable VIP durations with the current balance:"
   if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
     log " - 4 weeks: available, cost ${VIP_BLOCK_COST} points."
