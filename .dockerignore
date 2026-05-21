@@ -1,7 +1,11 @@
-# Real configuration containing MAM_ID
+.git
+.github
+
+# Local secrets and environment files
 config.env
 *.env
-!/config/config.env.example
+.env
+.env.*
 
 # Runtime cookies and state
 MAM.cookies
@@ -9,15 +13,14 @@ MAM.json
 wedge.last
 *.lock
 .mam-workdir/
+data/
+test-config/
+test-data/
 
-# Local logs
+# Logs
 *.log
 
 # Editor / OS
 .DS_Store
 .vscode/
 .idea/
-
-# Docker local runtime
-docker-config/
-docker-data/

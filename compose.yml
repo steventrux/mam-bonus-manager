@@ -1,0 +1,14 @@
+services:
+  mam-bonus-manager:
+    image: ghcr.io/steventrux/mam-bonus-manager:latest
+    container_name: mam-bonus-manager
+    restart: unless-stopped
+
+    environment:
+      - TZ=Europe/Rome
+      - MAM_CONFIG=/config/config.env
+      - MAM_INTERVAL_SECONDS=3600
+
+    volumes:
+      - ./docker-config:/config
+      - ./docker-data:/data
