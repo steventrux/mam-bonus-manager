@@ -2,7 +2,7 @@
 
 `mam-bonus-manager` is a configurable Bash tool for managing MyAnonamouse bonus points safely from a server, cron job, systemd timer or Docker container.
 
-It can validate the MAM session, read the current seedbonus balance, buy VIP, buy wedges, buy upload credit, and plan donations to new users. All spending actions support `--dry-run`, so configuration changes can be tested before any real purchase is sent.
+It can validate the MAM session, read the current seedbonus balance, buy VIP, buy wedges, buy upload credit, and donate bonus points to new users. All spending actions support `--dry-run`, so configuration changes can be tested before any real purchase or donation is sent.
 
 ## Features
 
@@ -12,11 +12,11 @@ It can validate the MAM session, read the current seedbonus balance, buy VIP, bu
 - Automated wedge purchases at a configurable interval.
 - Automated upload credit purchases using configurable package sizes.
 - Optional upload ratio guard: upload credit is bought only if the account ratio is below `UPLOAD_RATIO_THRESHOLD`.
-- Donation planning for new users, with amount, buffer, cooldown and max-users-per-run controls.
+- Donations to new users, with amount, buffer, cooldown and max-users-per-run controls.
 - Interactive manual mode for VIP, wedges, upload credit and donations.
 - Dedicated `--dry-run` mode for safe testing.
 - Configurable point buffers for upload and donation logic.
-- Purchase history in TSV format.
+- Purchase and donation history in TSV format.
 - Daily Telegram summary, optional.
 - Heartbeat URL support, optional.
 - Lock file with `flock` to prevent overlapping runs.
@@ -40,7 +40,7 @@ The upload step is controlled by both point availability and ratio threshold. Wi
 
 The donation step runs after VIP, wedge and upload credit. It uses only points above `DONATION_BUFFER`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, and limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`.
 
-At this stage, real donation sending is intentionally disabled in `lib/donations.sh`. The donation flow is wired into automatic and manual mode, but `send_donation()` logs the action in dry-run and skips real sending in normal mode until the final send logic is enabled.
+With `--dry-run`, donations are only printed. Without `--dry-run`, the script sends real donations through MAM and then records successful donations in `DONATION_STATE_FILE` and `PURCHASE_LOG_FILE`.
 
 ### Manual mode
 
@@ -55,7 +55,7 @@ Manual mode runs the steps in this order:
 
 Manual upload shows the current ratio and the configured automatic ratio threshold, but it does **not** block the manual purchase based on the ratio. The threshold is binding only in automated mode.
 
-Manual donations show the number of available new-user candidates after cooldown filtering. You then choose how many points to donate to each user and the maximum total budget for that manual run.
+Manual donations show the number of available new-user candidates after cooldown filtering. You then choose how many points to donate to each user and the maximum total budget for that manual run. With `--dry-run`, the selected donations are only printed. Without `--dry-run`, they are sent for real.
 
 ## Quick start
 
@@ -146,13 +146,13 @@ Automated upload purchases require both enough points above `BUFFER` and, unless
 | Variable | Default | Description |
 | --- | ---: | --- |
 | `DONATIONS` | `0` | Set to `1` to enable the automated donation step and donation planner. |
-| `DONATION_AMOUNT` | `100` | Points planned per user in automated donation mode. |
-| `DONATION_BUFFER` | `5000` | Points to keep untouched before planning donations. |
+| `DONATION_AMOUNT` | `100` | Points donated per user in automated donation mode. |
+| `DONATION_BUFFER` | `5000` | Points to keep untouched before sending donations. |
 | `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum new-user donation candidates per automatic run. |
-| `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can be planned again. `0` means never repeat. |
+| `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
 
-Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, and plans donations only while enough points remain above the configured donation buffer.
+Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, and sends donations only while enough points remain above the configured donation buffer.
 
 ### Notification settings
 
@@ -228,7 +228,7 @@ The planner:
 5. applies the local cooldown history;
 6. prints the donations it would make.
 
-The planner is intentionally safe: it uses dry-run behavior and does not send real donations.
+The planner is intentionally dry-run only. Use the main script without `--dry-run` when you want to send real donations.
 
 ## Local dry-run workflow
 
@@ -346,7 +346,7 @@ Recommended workflow:
 ./mam-bonus-manager.sh --dry-run manual
 ```
 
-Only run without `--dry-run` after reviewing the output.
+Only run without `--dry-run` after reviewing the output. When `DONATIONS=1`, running without `--dry-run` can send real donations to new users.
 
 ## Project layout
 
