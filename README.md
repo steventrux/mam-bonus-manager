@@ -9,6 +9,8 @@ It can:
 - optionally buy or extend VIP only when needed and only for eligible account classes;
 - buy wedges at a configurable interval;
 - buy upload credit in configurable package sizes;
+- optionally buy upload credit only when the account ratio is below a configured threshold;
+- plan donations to new users in safe dry-run mode;
 - refresh the bonus balance after each automated purchase step;
 - keep a configurable points buffer untouched in automated mode;
 - prevent concurrent runs with `flock`;
@@ -66,6 +68,13 @@ Main variables:
 | `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after automated or manual wedge purchases |
 | `MIN_UPLOAD_GB` | `50` | minimum upload package size allowed for automated API purchases |
 | `UPLOAD_PACKS` | `100 50` | upload credit package sizes to buy, in GB |
+| `UPLOAD_RATIO_THRESHOLD` | `2.5` | automated upload credit is bought only if current ratio is below this value; `0` disables the ratio guard |
+| `DONATIONS` | `0` | set to `1` to enable donation planning in `scripts/donation-planner.sh` |
+| `DONATION_AMOUNT` | `100` | bonus points planned for each new-user donation |
+| `DONATION_BUFFER` | `5000` | minimum points to keep before planning donations |
+| `DONATION_MAX_USERS_PER_RUN` | `5` | maximum donation candidates per planner run |
+| `DONATION_COOLDOWN_DAYS` | `30` | cooldown before the same user can be planned again; `0` means never repeat |
+| `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | local donation history file |
 | `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.3` | User-Agent sent by curl |
 | `HEARTBEAT_URL` | empty | optional HTTP heartbeat URL |
 | `TELEGRAM_DAILY_SUMMARY` | `0` | set to `1` to enable daily Telegram purchase summaries |
@@ -91,6 +100,8 @@ In automated mode, purchases are processed in this order:
 
 VIP is purchased only if `VIP=1` and the account class reported by `jsonLoad.php?snatch_summary` is eligible. Eligible classes are `Power User` and `VIP`. If the account is already VIP, the script also checks `vip_until` and buys only when the expiration date is within `VIP_THRESHOLD_WEEKS`. Other classes skip the VIP step and continue with wedge/upload checks.
 
+Upload credit now has an optional ratio guard. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, automated upload credit is purchased only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable this guard and keep the previous points/buffer-only behavior.
+
 After each real purchase step, the script refreshes the bonus balance from MAM before moving to the next step. In `--dry-run` mode, no purchase is sent to MAM and the script only estimates or reports the planned actions.
 
 Utility commands:
@@ -112,6 +123,37 @@ Use an alternate config file:
 ```bash
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
 ```
+
+## Donation planner dry-run
+
+Donations are currently implemented as a separate dry-run planner, not as part of the automatic `run` cycle. This lets you verify candidate selection, buffer handling and cooldown behavior before enabling any real send logic.
+
+Enable the planner in your config:
+
+```bash
+DONATIONS=1
+DONATION_AMOUNT=100
+DONATION_BUFFER=5000
+DONATION_MAX_USERS_PER_RUN=5
+DONATION_COOLDOWN_DAYS=30
+```
+
+Then run:
+
+```bash
+MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
+```
+
+The planner:
+
+1. validates or recreates the MAM session;
+2. reads the current points;
+3. keeps `DONATION_BUFFER` untouched;
+4. reads new-user candidates;
+5. skips users already present in `DONATION_STATE_FILE` within the cooldown period;
+6. prints the donations it would make.
+
+At this stage, real donation sending is intentionally disabled. `send_donation()` in `lib/donations.sh` only logs what would happen in dry-run and skips real sending.
 
 ## Interactive manual mode
 
@@ -185,9 +227,10 @@ MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh check-session
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh points
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
+MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
 ```
 
-With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, automated upload purchases only happen if your bonus balance is above the configured thresholds. Manual mode ignores that automated buffer and asks before every selected purchase.
+With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, automated upload purchases only happen if your bonus balance is above the configured thresholds and, by default, if your ratio is below `UPLOAD_RATIO_THRESHOLD`. Manual mode ignores that automated buffer and asks before every selected purchase.
 
 ## Docker
 
@@ -241,9 +284,11 @@ journalctl -u mam-bonus-manager.service -n 100 --no-pager
 - `--dry-run` shows planned purchases without spending points.
 - `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
 - Automated upload purchases respect MAM's current minimum package size.
+- Automated upload purchases can be guarded by `UPLOAD_RATIO_THRESHOLD`.
 - Automated mode runs in VIP -> wedge -> upload order and refreshes points after each purchase step.
 - Automated VIP purchase is skipped for non-eligible account classes and when VIP is already valid beyond the configured threshold.
 - Interactive mode supports controlled one-off VIP, wedge and upload purchases.
+- Donation planning is available separately in dry-run mode through `scripts/donation-planner.sh`.
 - Optional heartbeat and Telegram daily summary notifications are supported.
 - The script is function-based and easier to read and maintain.
 
