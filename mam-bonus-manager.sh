@@ -184,6 +184,17 @@ int_part() {
   printf '%s\n' "$1" | sed -E 's/\..*$//'
 }
 
+number_lt() {
+  local left="$1"
+  local right="$2"
+  jq -e -n --arg left "$left" --arg right "$right" '($left | tonumber) < ($right | tonumber)' >/dev/null 2>&1
+}
+
+number_le_zero() {
+  local value="$1"
+  jq -e -n --arg value "$value" '($value | tonumber) <= 0' >/dev/null 2>&1
+}
+
 ask_integer() {
   local prompt="$1"
   local max_value="$2"
@@ -253,6 +264,14 @@ get_points() {
   points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
   valid_number "$points" || fatal "Invalid seedbonus value in JSON response: ${points:-empty}"
   int_part "$points"
+}
+
+get_ratio() {
+  local uid="$1" response ratio
+  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+  ratio="$(jq -r '.ratio // .ratio_real // .uploaded_downloaded_ratio // empty' <<< "$response" 2>/dev/null | head -n1 | tr -d ',' || true)"
+  valid_number "$ratio" || return 1
+  printf '%s\n' "$ratio"
 }
 
 record_purchase() {
@@ -459,8 +478,27 @@ buy_wedge_if_needed() {
 }
 
 buy_upload_until_buffer() {
-  local points="$1" pack required now response new_points error_message refreshed_points pack_cost
+  local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio
   [[ "$MIN_UPLOAD_GB" =~ ^[0-9]+$ ]] || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
+  valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
+
+  if ! number_le_zero "$UPLOAD_RATIO_THRESHOLD"; then
+    current_ratio="$(get_ratio "$MAM_UID")" || {
+      warn "Could not read current ratio; skipping automated upload credit purchase for safety."
+      printf '%s\n' "$points"
+      return 0
+    }
+
+    if number_lt "$current_ratio" "$UPLOAD_RATIO_THRESHOLD"; then
+      log "Current ratio ${current_ratio} is below threshold ${UPLOAD_RATIO_THRESHOLD}; upload credit purchase is allowed."
+    else
+      log "Current ratio ${current_ratio} is not below threshold ${UPLOAD_RATIO_THRESHOLD}; skipping upload credit purchase."
+      printf '%s\n' "$points"
+      return 0
+    fi
+  else
+    log "UPLOAD_RATIO_THRESHOLD is ${UPLOAD_RATIO_THRESHOLD}; ratio guard is disabled."
+  fi
 
   for pack in $UPLOAD_PACKS; do
     [[ "$pack" =~ ^[0-9]+$ ]] || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
