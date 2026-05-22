@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # Donation helper functions for mam-bonus-manager.
-# Real sending is intentionally disabled until the dry-run flow has been validated.
 
 record_donation() {
   local uid="$1"
@@ -89,20 +88,46 @@ send_donation() {
   local uid="$1"
   local username="$2"
   local amount="$3"
+  local now response success error_message refreshed_points before after actual_cost
 
-  # Real donation send will be added only after dry-run validation.
+  valid_integer "$amount" || fatal "Donation amount must be numeric: $amount"
+  [[ "$amount" -gt 0 ]] || fatal "Donation amount must be greater than zero: $amount"
+
   if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
     log "DRY-RUN: would donate ${amount} bonus point(s) to ${username} (uid=${uid})."
     return 0
   fi
 
-  warn "Real donation sending is not implemented yet. Skipping ${username} (uid=${uid})."
-  return 1
+  before="$(get_points "$MAM_UID")"
+  now="$(date +%s%3N)"
+  response="$(json_get "${BASE_URL}/json/bonusBuy.php?spendtype=gift&amount=${amount}&giftTo=${uid}&_=${now}")" || {
+    warn "Donation to ${username} (uid=${uid}) failed: curl/API error."
+    return 1
+  }
+
+  success="$(jq -r '.success // empty' <<< "$response" 2>/dev/null || true)"
+  error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+
+  if [[ "$success" != "true" ]]; then
+    warn "Donation to ${username} (uid=${uid}) was not confirmed. API error: ${error_message:-none}. Response: $response"
+    return 1
+  fi
+
+  refreshed_points="$(get_points "$MAM_UID")"
+  after="$refreshed_points"
+  actual_cost=$((before - after))
+  [[ "$actual_cost" -lt 0 ]] && actual_cost="$amount"
+  [[ "$actual_cost" -eq 0 ]] && actual_cost="$amount"
+
+  record_donation "$uid" "$username" "$actual_cost"
+  record_purchase donation "$username" "$actual_cost"
+  log "Donation sent to ${username} (uid=${uid}): ${actual_cost} bonus point(s). Points after donation: ${after}."
+  return 0
 }
 
 donate_to_new_users_if_enabled() {
   local points="$1"
-  local uid username planned=0 spendable
+  local uid username planned=0 spendable before after
 
   truthy "${DONATIONS:-0}" || { printf '%s\n' "$points"; return 0; }
 
@@ -125,20 +150,29 @@ donate_to_new_users_if_enabled() {
     [[ "$spendable" -ge "$DONATION_AMOUNT" ]] || break
 
     if plan_donation "$uid" "$username" "$DONATION_AMOUNT"; then
-      send_donation "$uid" "$username" "$DONATION_AMOUNT" || true
-      planned=$((planned + 1))
-      spendable=$((spendable - DONATION_AMOUNT))
-      points=$((points - DONATION_AMOUNT))
+      before="$points"
+      if send_donation "$uid" "$username" "$DONATION_AMOUNT"; then
+        planned=$((planned + 1))
+        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+          points=$((points - DONATION_AMOUNT))
+        else
+          points="$(get_points "$MAM_UID")"
+        fi
+        after="$points"
+        spendable=$((points - DONATION_BUFFER))
+        [[ "$spendable" -lt 0 ]] && spendable=0
+        debug "Donation balance update: before=${before}, after=${after}, spendable=${spendable}."
+      fi
     fi
   done < <(get_donation_candidates)
 
-  log "Donation step completed. Planned donations: ${planned}. Estimated/current points: ${points}."
+  log "Donation step completed. Donations sent/planned: ${planned}. Estimated/current points: ${points}."
   printf '%s\n' "$points"
 }
 
 manual_donation_step() {
   local points="$1"
-  local candidate_count amount max_budget max_affordable max_total planned=0 spendable uid username
+  local candidate_count amount max_budget max_affordable max_total planned=0 spendable uid username before after
 
   log "Manual step 4/4 - Donations to new users"
 
@@ -174,13 +208,25 @@ manual_donation_step() {
     [[ "$spendable" -ge "$amount" ]] || break
 
     if plan_donation "$uid" "$username" "$amount"; then
-      send_donation "$uid" "$username" "$amount" || true
-      planned=$((planned + 1))
-      spendable=$((spendable - amount))
-      points=$((points - amount))
+      before="$points"
+      if send_donation "$uid" "$username" "$amount"; then
+        planned=$((planned + 1))
+        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+          points=$((points - amount))
+        else
+          points="$(get_points "$MAM_UID")"
+        fi
+        after="$points"
+        spendable=$((spendable - (before - after)))
+        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+          spendable=$((spendable - amount))
+        fi
+        [[ "$spendable" -lt 0 ]] && spendable=0
+        debug "Manual donation balance update: before=${before}, after=${after}, remaining budget=${spendable}."
+      fi
     fi
   done < <(get_donation_candidates)
 
-  log "Manual donation step completed. Planned donations: ${planned}. Estimated/current points: ${points}."
+  log "Manual donation step completed. Donations sent/planned: ${planned}. Estimated/current points: ${points}."
   printf '%s\n' "$points"
 }
