@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
 # Donation helper functions for mam-bonus-manager.
-# This module is intentionally not sourced by the main script yet.
-# It provides candidate discovery, local history and dry-run donation planning.
+# Real sending is intentionally disabled until the dry-run flow has been validated.
 
 record_donation() {
   local uid="$1"
@@ -52,6 +51,23 @@ get_new_users() {
     | awk -F '\t' 'NF >= 2 && !seen[$1]++ { print $1 "\t" $2 }'
 }
 
+get_donation_candidates() {
+  local uid username
+
+  while IFS=$'\t' read -r uid username; do
+    [[ -n "$uid" && -n "$username" ]] || continue
+    if donation_recently_sent "$uid" "$username"; then
+      debug "Donation candidate skipped for ${username} (uid=${uid}): cooldown active."
+      continue
+    fi
+    printf '%s\t%s\n' "$uid" "$username"
+  done < <(get_new_users)
+}
+
+count_donation_candidates() {
+  get_donation_candidates | awk 'END { print NR + 0 }'
+}
+
 plan_donation() {
   local uid="$1"
   local username="$2"
@@ -82,4 +98,89 @@ send_donation() {
 
   warn "Real donation sending is not implemented yet. Skipping ${username} (uid=${uid})."
   return 1
+}
+
+donate_to_new_users_if_enabled() {
+  local points="$1"
+  local uid username planned=0 spendable
+
+  truthy "${DONATIONS:-0}" || { printf '%s\n' "$points"; return 0; }
+
+  valid_integer "$DONATION_AMOUNT" || fatal "DONATION_AMOUNT must be numeric: $DONATION_AMOUNT"
+  valid_integer "$DONATION_BUFFER" || fatal "DONATION_BUFFER must be numeric: $DONATION_BUFFER"
+  valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
+
+  if [[ "$points" -le "$DONATION_BUFFER" ]]; then
+    log "Donation step skipped: points ${points} are not above DONATION_BUFFER ${DONATION_BUFFER}."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
+  spendable=$((points - DONATION_BUFFER))
+  log "Donation step enabled. Spendable points above donation buffer: ${spendable}."
+
+  while IFS=$'\t' read -r uid username; do
+    [[ -n "$uid" && -n "$username" ]] || continue
+    [[ "$planned" -lt "$DONATION_MAX_USERS_PER_RUN" ]] || break
+    [[ "$spendable" -ge "$DONATION_AMOUNT" ]] || break
+
+    if plan_donation "$uid" "$username" "$DONATION_AMOUNT"; then
+      send_donation "$uid" "$username" "$DONATION_AMOUNT" || true
+      planned=$((planned + 1))
+      spendable=$((spendable - DONATION_AMOUNT))
+      points=$((points - DONATION_AMOUNT))
+    fi
+  done < <(get_donation_candidates)
+
+  log "Donation step completed. Planned donations: ${planned}. Estimated/current points: ${points}."
+  printf '%s\n' "$points"
+}
+
+manual_donation_step() {
+  local points="$1"
+  local candidate_count amount max_budget max_affordable max_total planned=0 spendable uid username
+
+  log "Manual step 4/4 - Donations to new users"
+
+  candidate_count="$(count_donation_candidates)"
+  log "New-user donation candidates after cooldown filter: ${candidate_count}."
+
+  if [[ "$candidate_count" -eq 0 ]]; then
+    log "No donation candidates available."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
+  amount="$(ask_integer "Bonus points to donate to each new user? [0 to skip]: " "$points")"
+  [[ "$amount" -eq 0 ]] && { log "Donations skipped."; printf '%s\n' "$points"; return 0; }
+
+  max_affordable=$((points / amount * amount))
+  log "Maximum affordable total with ${amount} point(s) per user: ${max_affordable}."
+  max_budget="$(ask_integer "Maximum total points to spend on donations? [0-${max_affordable}, Enter=0]: " "$max_affordable")"
+  [[ "$max_budget" -eq 0 ]] && { log "Donations skipped."; printf '%s\n' "$points"; return 0; }
+
+  max_total=$((max_budget / amount * amount))
+  if [[ "$max_total" -eq 0 ]]; then
+    log "Donation budget is lower than the amount per user. Donations skipped."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
+  log "Manual donations selected: ${amount} point(s) per user, maximum total ${max_total}."
+  spendable="$max_total"
+
+  while IFS=$'\t' read -r uid username; do
+    [[ -n "$uid" && -n "$username" ]] || continue
+    [[ "$spendable" -ge "$amount" ]] || break
+
+    if plan_donation "$uid" "$username" "$amount"; then
+      send_donation "$uid" "$username" "$amount" || true
+      planned=$((planned + 1))
+      spendable=$((spendable - amount))
+      points=$((points - amount))
+    fi
+  done < <(get_donation_candidates)
+
+  log "Manual donation step completed. Planned donations: ${planned}. Estimated/current points: ${points}."
+  printf '%s\n' "$points"
 }
