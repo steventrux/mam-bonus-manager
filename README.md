@@ -1,25 +1,61 @@
 # mam-bonus-manager
 
-A safe and configurable Bash script for managing MyAnonamouse bonus points automatically.
+`mam-bonus-manager` is a configurable Bash tool for managing MyAnonamouse bonus points safely from a server, cron job, systemd timer or Docker container.
 
-It can:
+It can validate the MAM session, read the current seedbonus balance, buy VIP, buy wedges, buy upload credit, and plan donations to new users. All spending actions support `--dry-run`, so configuration changes can be tested before any real purchase is sent.
 
-- validate or recreate the MAM session using `MAM_ID` or `MAM_ID_FILE`;
-- read the current seedbonus balance;
-- optionally buy or extend VIP only when needed and only for eligible account classes;
-- buy wedges at a configurable interval;
-- buy upload credit in configurable package sizes;
-- optionally buy upload credit only when the account ratio is below a configured threshold;
-- plan donations to new users in safe dry-run mode;
-- refresh the bonus balance after each automated purchase step;
-- keep a configurable points buffer untouched in automated mode;
-- prevent concurrent runs with `flock`;
-- run safely in `--dry-run` mode;
-- provide an interactive manual mode for one-off purchases;
-- optionally write logs to a file;
-- optionally send heartbeat checks;
-- optionally send one Telegram daily purchase summary;
-- keep secrets and cookies outside the repository.
+## Features
+
+- Session management using `MAM_ID` or `MAM_ID_FILE`.
+- Current seedbonus balance lookup.
+- Automated VIP purchase or extension for eligible account classes.
+- Automated wedge purchases at a configurable interval.
+- Automated upload credit purchases using configurable package sizes.
+- Optional upload ratio guard: upload credit is bought only if the account ratio is below `UPLOAD_RATIO_THRESHOLD`.
+- Donation planning for new users, with amount, buffer, cooldown and max-users-per-run controls.
+- Interactive manual mode for VIP, wedges, upload credit and donations.
+- Dedicated `--dry-run` mode for safe testing.
+- Configurable point buffers for upload and donation logic.
+- Purchase history in TSV format.
+- Daily Telegram summary, optional.
+- Heartbeat URL support, optional.
+- Lock file with `flock` to prevent overlapping runs.
+- Docker, systemd and local shell usage.
+- Secrets, cookies and runtime state kept outside the repository.
+
+## Current purchase flow
+
+### Automated mode
+
+Automated mode runs the steps in this order:
+
+```text
+1. VIP
+2. Wedge
+3. Upload credit
+4. Donations to new users
+```
+
+The upload step is controlled by both point availability and ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
+
+The donation step runs after VIP, wedge and upload credit. It uses only points above `DONATION_BUFFER`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, and limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`.
+
+At this stage, real donation sending is intentionally disabled in `lib/donations.sh`. The donation flow is wired into automatic and manual mode, but `send_donation()` logs the action in dry-run and skips real sending in normal mode until the final send logic is enabled.
+
+### Manual mode
+
+Manual mode runs the steps in this order:
+
+```text
+1. VIP
+2. Wedge
+3. Upload credit
+4. Donations to new users
+```
+
+Manual upload shows the current ratio and the configured automatic ratio threshold, but it does **not** block the manual purchase based on the ratio. The threshold is binding only in automated mode.
+
+Manual donations show the number of available new-user candidates after cooldown filtering. You then choose how many points to donate to each user and the maximum total budget for that manual run.
 
 ## Quick start
 
@@ -29,116 +65,155 @@ sudo cp config/config.env.example /etc/mam-bonus-manager/config.env
 sudo nano /etc/mam-bonus-manager/config.env
 sudo chmod 600 /etc/mam-bonus-manager/config.env
 sudo chmod 700 /opt/MAM
-chmod +x mam-bonus-manager.sh
-./mam-bonus-manager.sh --dry-run
+chmod +x mam-bonus-manager.sh scripts/donation-planner.sh
+./mam-bonus-manager.sh --dry-run run
 ```
 
 Dependencies:
 
 ```bash
 sudo apt update
-sudo apt install -y curl jq util-linux findutils
+sudo apt install -y curl jq util-linux findutils grep sed gawk
 ```
+
+`awk` is required by the donation candidate parser. On Debian/Ubuntu, `gawk` or the default `awk` provider is sufficient.
 
 ## Configuration
 
-The real configuration file should stay outside git:
+The production configuration file should stay outside git:
 
 ```text
 /etc/mam-bonus-manager/config.env
 ```
 
-Most options can also be overridden with environment variables prefixed with `MAM_`, for example `MAM_BUFFER`, `MAM_VIP`, `MAM_WORKDIR`, `MAM_DRY_RUN`, `MAM_VERBOSITY`, `MAM_HEARTBEAT_URL`, `MAM_TELEGRAM_BOT_TOKEN` and `MAM_TELEGRAM_CHAT_ID`.
-
-Main variables:
-
-| Variable | Default | Meaning |
-| --- | ---: | --- |
-| `MAM_ID` | required | value of the `mam_id` cookie |
-| `MAM_ID_FILE` | empty | optional file containing the `mam_id` value |
-| `WORKDIR` | `/opt/MAM` | working directory for cookies, lock file and state files |
-| `VERBOSITY` | `1` | `0=ERROR`, `1=INFO/WARN`, `2=DEBUG` |
-| `LOG_FILE` | empty | optional extra log file path |
-| `BUFFER` | `55000` | bonus points to keep untouched before buying upload credit in automated mode |
-| `VIP` | `0` | set to `1` to enable automated VIP purchase/extension |
-| `VIP_BLOCK_COST` | `5000` | VIP cost for one 4-week block; manual VIP supports `4`, `8`, `12`, or `max` |
-| `VIP_THRESHOLD_WEEKS` | `11` | automated VIP purchase threshold |
-| `WEDGE_HOURS` | `4` | wedge purchase interval; `0` disables automated wedges |
-| `WEDGE_COST` | `50000` | wedge cost in bonus points |
-| `WEDGE_RESERVE_AFTER` | `5000` | minimum points to keep after automated or manual wedge purchases |
-| `MIN_UPLOAD_GB` | `50` | minimum upload package size allowed for automated API purchases |
-| `UPLOAD_PACKS` | `100 50` | upload credit package sizes to buy, in GB |
-| `UPLOAD_RATIO_THRESHOLD` | `2.5` | automated upload credit is bought only if current ratio is below this value; `0` disables the ratio guard |
-| `DONATIONS` | `0` | set to `1` to enable donation planning in `scripts/donation-planner.sh` |
-| `DONATION_AMOUNT` | `100` | bonus points planned for each new-user donation |
-| `DONATION_BUFFER` | `5000` | minimum points to keep before planning donations |
-| `DONATION_MAX_USERS_PER_RUN` | `5` | maximum donation candidates per planner run |
-| `DONATION_COOLDOWN_DAYS` | `30` | cooldown before the same user can be planned again; `0` means never repeat |
-| `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | local donation history file |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.3` | User-Agent sent by curl |
-| `HEARTBEAT_URL` | empty | optional HTTP heartbeat URL |
-| `TELEGRAM_DAILY_SUMMARY` | `0` | set to `1` to enable daily Telegram purchase summaries |
-| `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | empty | Telegram chat ID |
-| `PURCHASE_LOG_FILE` | `$WORKDIR/purchases.tsv` | local purchase event log used for summaries |
-| `TELEGRAM_SENT_FILE` | `$WORKDIR/telegram-summary.sent` | tracks already-sent summary dates |
-
-## Usage
-
-Automated mode, suitable for cron or systemd:
+Start from the example file:
 
 ```bash
-./mam-bonus-manager.sh --dry-run
+cp config/config.env.example config.env
+```
+
+Most variables can also be overridden with the `MAM_` prefix. For example, `BUFFER` can be overridden by `MAM_BUFFER`, `VIP` by `MAM_VIP`, and `UPLOAD_RATIO_THRESHOLD` by `MAM_UPLOAD_RATIO_THRESHOLD`.
+
+### Required session settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `MAM_ID` | required | Value of the `mam_id` cookie. Do not commit it. |
+| `MAM_ID_FILE` | empty | Optional file containing the `mam_id` value. Useful for secret management. |
+| `WORKDIR` | `/opt/MAM` | Runtime directory for cookies, lock file, state files and purchase logs. |
+
+### Logging and runtime settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `VERBOSITY` | `1` | `0=ERROR`, `1=INFO/WARN`, `2=DEBUG`. |
+| `LOG_FILE` | empty | Optional additional log file path. |
+| `CURL_TIMEOUT` | `30` | Maximum curl request time in seconds. |
+| `CURL_RETRIES` | `3` | Number of curl retries. |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.4` | User-Agent sent to MAM. |
+
+### VIP settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `VIP` | `0` | Set to `1` to enable automatic VIP purchase or extension. |
+| `VIP_BLOCK_COST` | `5000` | Cost of one 4-week VIP block. |
+| `VIP_THRESHOLD_WEEKS` | `11` | If already VIP, automatic extension runs only when VIP expires within this many weeks. |
+
+Automatic VIP is available only for eligible account classes reported by MAM. The script currently treats `Power User` and `VIP` as eligible.
+
+### Wedge settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `WEDGE_HOURS` | `4` | Buy one wedge every N hours. Set to `0` to disable automatic wedges. |
+| `WEDGE_COST` | `50000` | Wedge cost in bonus points. |
+| `WEDGE_RESERVE_AFTER` | `5000` | Minimum points to keep after wedge purchases. |
+
+### Upload credit settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `BUFFER` | `55000` | Points to keep untouched before buying upload credit in automated mode. |
+| `MIN_UPLOAD_GB` | `50` | Minimum upload package size allowed for automated purchases. |
+| `UPLOAD_PACKS` | `100 50` | Upload credit package sizes to try, from largest to smallest, in GB. |
+| `UPLOAD_RATIO_THRESHOLD` | `2.5` | Buy upload credit only if current ratio is below this value. Set to `0` to disable. |
+
+Automated upload purchases require both enough points above `BUFFER` and, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`.
+
+### Donation settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `DONATIONS` | `0` | Set to `1` to enable the automated donation step and donation planner. |
+| `DONATION_AMOUNT` | `100` | Points planned per user in automated donation mode. |
+| `DONATION_BUFFER` | `5000` | Points to keep untouched before planning donations. |
+| `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum new-user donation candidates per automatic run. |
+| `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can be planned again. `0` means never repeat. |
+| `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
+
+Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, and plans donations only while enough points remain above the configured donation buffer.
+
+### Notification settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `HEARTBEAT_URL` | empty | Optional push URL for Healthchecks.io, Uptime Kuma or similar. |
+| `TELEGRAM_DAILY_SUMMARY` | `0` | Set to `1` to enable one daily Telegram summary. |
+| `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token. |
+| `TELEGRAM_CHAT_ID` | empty | Telegram chat ID. |
+| `PURCHASE_LOG_FILE` | `$WORKDIR/purchases.tsv` | TSV purchase history used by summaries. |
+| `TELEGRAM_SENT_FILE` | `$WORKDIR/telegram-summary.sent` | Tracks already-sent summary dates. |
+
+## Commands
+
+### Automated run
+
+```bash
+./mam-bonus-manager.sh --dry-run run
 ./mam-bonus-manager.sh run
 ```
 
-In automated mode, purchases are processed in this order:
-
-1. VIP purchase/extension;
-2. wedge purchase;
-3. upload credit purchase.
-
-VIP is purchased only if `VIP=1` and the account class reported by `jsonLoad.php?snatch_summary` is eligible. Eligible classes are `Power User` and `VIP`. If the account is already VIP, the script also checks `vip_until` and buys only when the expiration date is within `VIP_THRESHOLD_WEEKS`. Other classes skip the VIP step and continue with wedge/upload checks.
-
-Upload credit now has an optional ratio guard. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, automated upload credit is purchased only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable this guard and keep the previous points/buffer-only behavior.
-
-After each real purchase step, the script refreshes the bonus balance from MAM before moving to the next step. In `--dry-run` mode, no purchase is sent to MAM and the script only estimates or reports the planned actions.
-
-Utility commands:
+`run` is the default command, so this is equivalent:
 
 ```bash
-./mam-bonus-manager.sh check-session
-./mam-bonus-manager.sh points
+./mam-bonus-manager.sh --dry-run
 ```
 
-Interactive manual mode:
+Use `--dry-run` first after every config change.
+
+### Manual interactive mode
 
 ```bash
 ./mam-bonus-manager.sh --dry-run manual
 ./mam-bonus-manager.sh manual
 ```
 
-Use an alternate config file:
+Manual mode asks step by step. You can skip each step by entering `0` or pressing Enter where supported.
+
+Manual mode currently includes:
+
+- VIP duration selection: `0`, `4`, `8`, `12`, or `max`.
+- Number of wedges to buy.
+- Upload package and quantity selection.
+- Donation amount per user and maximum total donation budget.
+
+### Session and balance checks
 
 ```bash
-MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run
+./mam-bonus-manager.sh check-session
+./mam-bonus-manager.sh points
 ```
 
-## Donation planner dry-run
-
-Donations are currently implemented as a separate dry-run planner, not as part of the automatic `run` cycle. This lets you verify candidate selection, buffer handling and cooldown behavior before enabling any real send logic.
-
-Enable the planner in your config:
+### Alternate config file
 
 ```bash
-DONATIONS=1
-DONATION_AMOUNT=100
-DONATION_BUFFER=5000
-DONATION_MAX_USERS_PER_RUN=5
-DONATION_COOLDOWN_DAYS=30
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
 ```
 
-Then run:
+## Donation planner
+
+A dedicated donation planner is available for testing the donation candidate flow independently from the main purchase cycle:
 
 ```bash
 MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
@@ -147,63 +222,17 @@ MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
 The planner:
 
 1. validates or recreates the MAM session;
-2. reads the current points;
+2. reads the current point balance;
 3. keeps `DONATION_BUFFER` untouched;
 4. reads new-user candidates;
-5. skips users already present in `DONATION_STATE_FILE` within the cooldown period;
+5. applies the local cooldown history;
 6. prints the donations it would make.
 
-At this stage, real donation sending is intentionally disabled. `send_donation()` in `lib/donations.sh` only logs what would happen in dry-run and skips real sending.
+The planner is intentionally safe: it uses dry-run behavior and does not send real donations.
 
-## Interactive manual mode
+## Local dry-run workflow
 
-Manual mode is intended for one-off runs from a terminal. It does not replace the automated `run` command used by cron or systemd.
-
-It proceeds in three steps:
-
-1. VIP purchase/extension;
-2. wedge purchase;
-3. upload credit purchase.
-
-Before each step, the script prints the current points, the relevant cost and the maximum quantity currently purchasable. You can enter `0` or press Enter to skip a step.
-
-Manual VIP is shown only for eligible account classes: `Power User` and `VIP`. It accepts only the documented durations: `4`, `8`, `12`, or `max`. The default cost is `5000` points per 4-week block, so `4` costs 5000 points, `8` costs 10000 points, and `12` costs 15000 points. The `max` option lets the API decide the maximum valid duration.
-
-Manual mode does **not** apply the automated `BUFFER` to VIP or upload purchases. It only prevents you from selecting more than your current balance can buy. Wedges still respect `WEDGE_RESERVE_AFTER`, because that setting is specific to wedge safety.
-
-Example safe test:
-
-```bash
-MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
-```
-
-In `--dry-run` mode, no purchase is sent to MAM. The script only estimates the point balance after each selected step. For manual VIP `max`, the final cost is decided by the API, so dry-run leaves the point estimate unchanged.
-
-## Notifications
-
-### Heartbeat
-
-Set `HEARTBEAT_URL` to a push monitor URL, such as Healthchecks.io or Uptime Kuma. The heartbeat is sent at the end of successful non-dry-run executions.
-
-```bash
-HEARTBEAT_URL="https://example.com/api/push/..."
-```
-
-### Telegram daily summary
-
-Telegram summaries are optional and disabled by default. When enabled, the script records successful purchases in `PURCHASE_LOG_FILE` and sends at most one summary per day for the previous day's purchases.
-
-```bash
-TELEGRAM_DAILY_SUMMARY=1
-TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
-TELEGRAM_CHAT_ID="your_telegram_chat_id"
-```
-
-The summary includes total VIP purchases, wedges, upload credit and points spent for the day. No Telegram message is sent if there were no purchases for the summarized date.
-
-## Local dry-run test
-
-Use this workflow to test the script locally on any Linux-like environment without writing to `/etc` or `/opt`.
+Use this workflow to test without writing to `/etc` or `/opt`:
 
 ```bash
 cp config/config.env.example ./config.env
@@ -218,9 +247,10 @@ MAM_ID="your_real_mam_id"
 WORKDIR="$PWD/.mam-workdir"
 VIP=0
 WEDGE_HOURS=0
+DONATIONS=1
 ```
 
-Then run:
+Run checks and dry-runs:
 
 ```bash
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh check-session
@@ -230,33 +260,44 @@ MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run manual
 MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
 ```
 
-With `VIP=0` and `WEDGE_HOURS=0`, the automated `run` command will not buy VIP or wedges. With the default `BUFFER=55000`, automated upload purchases only happen if your bonus balance is above the configured thresholds and, by default, if your ratio is below `UPLOAD_RATIO_THRESHOLD`. Manual mode ignores that automated buffer and asks before every selected purchase.
-
 ## Docker
 
-Docker is an alternative to the classic Linux/systemd installation. The existing Linux/systemd setup remains fully supported.
+Docker is supported as an alternative to local/systemd installation.
 
 - The container does not expose ports.
 - Configuration is read from `/config/config.env`.
-- `/data` is the persistent `WORKDIR` for cookies, lock files, runtime state, and purchase history.
+- `/data` is the persistent `WORKDIR` for cookies, lock files, state files and purchase history.
 - With Docker, set `WORKDIR="/data"` in `config.env`.
-- You can run it with Docker Compose using the provided `compose.yml`.
 
-One-off manual commands are supported:
+One-off examples:
 
 ```bash
 docker run --rm ghcr.io/steventrux/mam-bonus-manager:latest --version
-docker run --rm -it -v "$PWD/docker-config:/config" -v "$PWD/docker-data:/data" ghcr.io/steventrux/mam-bonus-manager:latest --dry-run run
-docker run --rm -it -v "$PWD/docker-config:/config" -v "$PWD/docker-data:/data" ghcr.io/steventrux/mam-bonus-manager:latest --dry-run manual
+docker run --rm -it \
+  -v "$PWD/docker-config:/config" \
+  -v "$PWD/docker-data:/data" \
+  ghcr.io/steventrux/mam-bonus-manager:latest --dry-run run
+
+docker run --rm -it \
+  -v "$PWD/docker-config:/config" \
+  -v "$PWD/docker-data:/data" \
+  ghcr.io/steventrux/mam-bonus-manager:latest --dry-run manual
 ```
 
 For production usage, prefer versioned image tags once releases are available.
 
 ## Systemd timer
 
+Install the script:
+
 ```bash
 sudo cp mam-bonus-manager.sh /usr/local/bin/mam-bonus-manager
 sudo chmod +x /usr/local/bin/mam-bonus-manager
+```
+
+Install and enable the timer:
+
+```bash
 sudo cp systemd/mam-bonus-manager.service /etc/systemd/system/
 sudo cp systemd/mam-bonus-manager.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -264,33 +305,28 @@ sudo systemctl enable --now mam-bonus-manager.timer
 systemctl list-timers mam-bonus-manager.timer
 ```
 
-Manual test:
+Manual systemd test:
 
 ```bash
 sudo systemctl start mam-bonus-manager.service
 journalctl -u mam-bonus-manager.service -n 100 --no-pager
 ```
 
-## Improvements over the original script
+## Runtime files
 
-- `MAM_ID` is no longer stored in the script.
-- `MAM_ID` can be read from a separate file.
-- Runtime options can be overridden with environment variables.
-- Cookies and configuration files use restrictive permissions.
-- Wedge, VIP and upload URLs use a fresh timestamp for each request.
-- `curl` uses timeouts, retries and explicit failure handling.
-- Bonus points are validated before numeric comparisons.
-- A lock file prevents overlapping runs.
-- `--dry-run` shows planned purchases without spending points.
-- `WEDGE_RESERVE_AFTER` prevents buying wedges when it would leave too few points.
-- Automated upload purchases respect MAM's current minimum package size.
-- Automated upload purchases can be guarded by `UPLOAD_RATIO_THRESHOLD`.
-- Automated mode runs in VIP -> wedge -> upload order and refreshes points after each purchase step.
-- Automated VIP purchase is skipped for non-eligible account classes and when VIP is already valid beyond the configured threshold.
-- Interactive mode supports controlled one-off VIP, wedge and upload purchases.
-- Donation planning is available separately in dry-run mode through `scripts/donation-planner.sh`.
-- Optional heartbeat and Telegram daily summary notifications are supported.
-- The script is function-based and easier to read and maintain.
+Typical runtime files are stored under `WORKDIR`:
+
+```text
+MAM.cookies
+MAM.json
+mam-bonus-manager.lock
+wedge.last
+purchases.tsv
+donations.tsv
+telegram-summary.sent
+```
+
+These files may contain sensitive data or account activity history. Do not commit them.
 
 ## Safety notes
 
@@ -300,6 +336,25 @@ Never commit:
 - Telegram bot tokens or chat IDs;
 - `MAM.cookies`;
 - the real `config.env` file;
+- runtime state files;
 - logs containing sensitive API responses.
 
-Run `--dry-run` first after every configuration change.
+Recommended workflow:
+
+```bash
+./mam-bonus-manager.sh --dry-run run
+./mam-bonus-manager.sh --dry-run manual
+```
+
+Only run without `--dry-run` after reviewing the output.
+
+## Project layout
+
+```text
+mam-bonus-manager.sh              Main script
+config/config.env.example         Example configuration
+lib/donations.sh                  Donation helper functions
+scripts/donation-planner.sh       Standalone donation dry-run planner
+systemd/                          systemd service and timer files
+compose.yml                       Docker Compose example
+```
