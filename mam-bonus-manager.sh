@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.2.3"
+VERSION="1.2.4"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
 VERBOSITY=1
 LOG_FILE=""
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 log_line() {
   local level="$1"
@@ -43,8 +44,8 @@ Usage:
   ./mam-bonus-manager.sh [options] [command]
 
 Commands:
-  run             Run the automated cycle: session, VIP, wedge, upload credit. Default.
-  manual          Interactive manual mode: choose VIP, wedges and upload credit step by step.
+  run             Run the automated cycle: session, VIP, wedge, upload credit, donations. Default.
+  manual          Interactive manual mode: choose VIP, wedges, upload credit and donations step by step.
   interactive     Alias of manual.
   check-session   Validate or recreate the MAM session only.
   points          Show the current seedbonus balance only.
@@ -54,11 +55,6 @@ Options:
   --config FILE   Configuration file to use. Default: ${CONFIG_FILE}
   --dry-run       Do not buy anything; only print what would be done.
   --version       Show the version.
-
-Examples:
-  ./mam-bonus-manager.sh --dry-run
-  ./mam-bonus-manager.sh --dry-run manual
-  MAM_CONFIG=./config.env ./mam-bonus-manager.sh run
 USAGE
 }
 
@@ -77,99 +73,6 @@ parse_args() {
 
 truthy() {
   [[ "$1" == "1" || "$1" == "true" || "$1" == "yes" || "$1" == "on" ]]
-}
-
-vip_purchase_allowed() {
-  local class_name="$1"
-  case "$class_name" in
-    VIP|"Power User") return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-load_config() {
-  [[ -r "$CONFIG_FILE" ]] || fatal "Configuration file is not readable: $CONFIG_FILE. Copy config/config.env.example and set MAM_ID or MAM_ID_FILE."
-  # shellcheck disable=SC1090
-  source "$CONFIG_FILE"
-
-  DRY_RUN="${MAM_DRY_RUN:-${MAM_DRYRUN:-$DRY_RUN}}"
-  VERBOSITY="${MAM_VERBOSITY:-${VERBOSITY:-1}}"
-  LOG_FILE="${MAM_LOG_FILE:-${LOG_FILE:-}}"
-
-  MAM_ID="${MAM_ID:-}"
-  MAM_ID_FILE="${MAM_ID_FILE:-}"
-  MAM_ID="${MAM_TOKEN:-${MAM_ID}}"
-  MAM_ID_FILE="${MAM_TOKEN_FILE:-${MAM_ID_FILE}}"
-
-  WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
-  BUFFER="${MAM_BUFFER:-${BUFFER:-55000}}"
-  VIP="${MAM_VIP:-${VIP:-0}}"
-  VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
-  VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
-  WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-4}}}"
-  WEDGE_COST="${MAM_WEDGE_COST:-${WEDGE_COST:-50000}}"
-  WEDGE_RESERVE_AFTER="${MAM_WEDGE_RESERVE_AFTER:-${WEDGE_RESERVE_AFTER:-5000}}"
-  CURL_TIMEOUT="${MAM_CURL_TIMEOUT:-${CURL_TIMEOUT:-30}}"
-  CURL_RETRIES="${MAM_CURL_RETRIES:-${CURL_RETRIES:-3}}"
-  USER_AGENT="${MAM_USER_AGENT:-${USER_AGENT:-Mozilla/5.0 mam-bonus-manager/${VERSION}}}"
-  MIN_UPLOAD_GB="${MAM_MIN_UPLOAD_GB:-${MIN_UPLOAD_GB:-50}}"
-  UPLOAD_PACKS="${MAM_UPLOAD_PACKS:-${UPLOAD_PACKS:-100 50}}"
-  UPLOAD_RATIO_THRESHOLD="${MAM_UPLOAD_RATIO_THRESHOLD:-${UPLOAD_RATIO_THRESHOLD:-2.5}}"
-  DONATIONS="${MAM_DONATIONS:-${DONATIONS:-0}}"
-  DONATION_AMOUNT="${MAM_DONATION_AMOUNT:-${DONATION_AMOUNT:-100}}"
-  DONATION_BUFFER="${MAM_DONATION_BUFFER:-${DONATION_BUFFER:-5000}}"
-  DONATION_MAX_USERS_PER_RUN="${MAM_DONATION_MAX_USERS_PER_RUN:-${DONATION_MAX_USERS_PER_RUN:-5}}"
-  DONATION_COOLDOWN_DAYS="${MAM_DONATION_COOLDOWN_DAYS:-${DONATION_COOLDOWN_DAYS:-30}}"
-
-  HEARTBEAT_URL="${MAM_HEARTBEAT_URL:-${MAM_HEARTBEAT:-${HEARTBEAT_URL:-}}}"
-  TELEGRAM_BOT_TOKEN="${MAM_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}"
-  TELEGRAM_CHAT_ID="${MAM_TELEGRAM_CHAT_ID:-${TELEGRAM_CHAT_ID:-}}"
-  TELEGRAM_DAILY_SUMMARY="${MAM_TELEGRAM_DAILY_SUMMARY:-${TELEGRAM_DAILY_SUMMARY:-0}}"
-
-  if [[ -n "$MAM_ID_FILE" ]]; then
-    [[ -r "$MAM_ID_FILE" ]] || fatal "MAM_ID_FILE is not readable: $MAM_ID_FILE"
-    MAM_ID="$(tr -d '[:space:]' < "$MAM_ID_FILE")"
-  fi
-  [[ -n "$MAM_ID" ]] || fatal "MAM_ID is missing. Set MAM_ID or MAM_ID_FILE in $CONFIG_FILE."
-
-  BASE_URL="https://www.myanonamouse.net"
-  COOKIE_FILE="${MAM_COOKIE_FILE:-${COOKIE_FILE:-${WORKDIR}/MAM.cookies}}"
-  JSON_FILE="${MAM_JSON_FILE:-${JSON_FILE:-${WORKDIR}/MAM.json}}"
-  LOCK_FILE="${MAM_LOCK_FILE:-${LOCK_FILE:-${WORKDIR}/mam-bonus-manager.lock}}"
-  WEDGE_STATE_FILE="${MAM_WEDGE_STATE_FILE:-${WEDGE_STATE_FILE:-${WORKDIR}/wedge.last}}"
-  DONATION_STATE_FILE="${MAM_DONATION_STATE_FILE:-${DONATION_STATE_FILE:-${WORKDIR}/donations.tsv}}"
-  PURCHASE_LOG_FILE="${MAM_PURCHASE_LOG_FILE:-${PURCHASE_LOG_FILE:-${WORKDIR}/purchases.tsv}}"
-  TELEGRAM_SENT_FILE="${MAM_TELEGRAM_SENT_FILE:-${TELEGRAM_SENT_FILE:-${WORKDIR}/telegram-summary.sent}}"
-
-  mkdir -p "$WORKDIR"
-  chmod 700 "$WORKDIR" 2>/dev/null || true
-  touch "$COOKIE_FILE"
-  chmod 600 "$COOKIE_FILE" 2>/dev/null || true
-  if [[ -n "$LOG_FILE" ]]; then
-    mkdir -p "$(dirname "$LOG_FILE")"
-    touch "$LOG_FILE"
-    chmod 600 "$LOG_FILE" 2>/dev/null || true
-  fi
-}
-
-check_dependencies() {
-  local missing=()
-  for bin in curl jq date find flock; do
-    command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
-  done
-  [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
-}
-
-json_get() {
-  local url="$1"
-  curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
-    -A "$USER_AGENT" -b "$COOKIE_FILE" -c "$COOKIE_FILE" "$url"
-}
-
-json_get_with_mamid() {
-  local url="$1"
-  curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
-    -A "$USER_AGENT" -b "mam_id=${MAM_ID}" -c "$COOKIE_FILE" "$url"
 }
 
 valid_number() {
@@ -218,6 +121,101 @@ ask_integer() {
     return 0
   done
 }
+
+vip_purchase_allowed() {
+  local class_name="$1"
+  case "$class_name" in
+    VIP|"Power User") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+load_config() {
+  [[ -r "$CONFIG_FILE" ]] || fatal "Configuration file is not readable: $CONFIG_FILE. Copy config/config.env.example and set MAM_ID or MAM_ID_FILE."
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+
+  DRY_RUN="${MAM_DRY_RUN:-${MAM_DRYRUN:-$DRY_RUN}}"
+  VERBOSITY="${MAM_VERBOSITY:-${VERBOSITY:-1}}"
+  LOG_FILE="${MAM_LOG_FILE:-${LOG_FILE:-}}"
+
+  MAM_ID="${MAM_TOKEN:-${MAM_ID:-}}"
+  MAM_ID_FILE="${MAM_TOKEN_FILE:-${MAM_ID_FILE:-}}"
+
+  WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
+  BUFFER="${MAM_BUFFER:-${BUFFER:-55000}}"
+  VIP="${MAM_VIP:-${VIP:-0}}"
+  VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
+  VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
+  WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-4}}}"
+  WEDGE_COST="${MAM_WEDGE_COST:-${WEDGE_COST:-50000}}"
+  WEDGE_RESERVE_AFTER="${MAM_WEDGE_RESERVE_AFTER:-${WEDGE_RESERVE_AFTER:-5000}}"
+  CURL_TIMEOUT="${MAM_CURL_TIMEOUT:-${CURL_TIMEOUT:-30}}"
+  CURL_RETRIES="${MAM_CURL_RETRIES:-${CURL_RETRIES:-3}}"
+  USER_AGENT="${MAM_USER_AGENT:-${USER_AGENT:-Mozilla/5.0 mam-bonus-manager/${VERSION}}}"
+  MIN_UPLOAD_GB="${MAM_MIN_UPLOAD_GB:-${MIN_UPLOAD_GB:-50}}"
+  UPLOAD_PACKS="${MAM_UPLOAD_PACKS:-${UPLOAD_PACKS:-100 50}}"
+  UPLOAD_RATIO_THRESHOLD="${MAM_UPLOAD_RATIO_THRESHOLD:-${UPLOAD_RATIO_THRESHOLD:-2.5}}"
+
+  DONATIONS="${MAM_DONATIONS:-${DONATIONS:-0}}"
+  DONATION_AMOUNT="${MAM_DONATION_AMOUNT:-${DONATION_AMOUNT:-100}}"
+  DONATION_BUFFER="${MAM_DONATION_BUFFER:-${DONATION_BUFFER:-5000}}"
+  DONATION_MAX_USERS_PER_RUN="${MAM_DONATION_MAX_USERS_PER_RUN:-${DONATION_MAX_USERS_PER_RUN:-5}}"
+  DONATION_COOLDOWN_DAYS="${MAM_DONATION_COOLDOWN_DAYS:-${DONATION_COOLDOWN_DAYS:-30}}"
+
+  HEARTBEAT_URL="${MAM_HEARTBEAT_URL:-${MAM_HEARTBEAT:-${HEARTBEAT_URL:-}}}"
+  TELEGRAM_BOT_TOKEN="${MAM_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}"
+  TELEGRAM_CHAT_ID="${MAM_TELEGRAM_CHAT_ID:-${TELEGRAM_CHAT_ID:-}}"
+  TELEGRAM_DAILY_SUMMARY="${MAM_TELEGRAM_DAILY_SUMMARY:-${TELEGRAM_DAILY_SUMMARY:-0}}"
+
+  if [[ -n "$MAM_ID_FILE" ]]; then
+    [[ -r "$MAM_ID_FILE" ]] || fatal "MAM_ID_FILE is not readable: $MAM_ID_FILE"
+    MAM_ID="$(tr -d '[:space:]' < "$MAM_ID_FILE")"
+  fi
+  [[ -n "$MAM_ID" ]] || fatal "MAM_ID is missing. Set MAM_ID or MAM_ID_FILE in $CONFIG_FILE."
+
+  BASE_URL="https://www.myanonamouse.net"
+  COOKIE_FILE="${MAM_COOKIE_FILE:-${COOKIE_FILE:-${WORKDIR}/MAM.cookies}}"
+  JSON_FILE="${MAM_JSON_FILE:-${JSON_FILE:-${WORKDIR}/MAM.json}}"
+  LOCK_FILE="${MAM_LOCK_FILE:-${LOCK_FILE:-${WORKDIR}/mam-bonus-manager.lock}}"
+  WEDGE_STATE_FILE="${MAM_WEDGE_STATE_FILE:-${WEDGE_STATE_FILE:-${WORKDIR}/wedge.last}}"
+  DONATION_STATE_FILE="${MAM_DONATION_STATE_FILE:-${DONATION_STATE_FILE:-${WORKDIR}/donations.tsv}}"
+  PURCHASE_LOG_FILE="${MAM_PURCHASE_LOG_FILE:-${PURCHASE_LOG_FILE:-${WORKDIR}/purchases.tsv}}"
+  TELEGRAM_SENT_FILE="${MAM_TELEGRAM_SENT_FILE:-${TELEGRAM_SENT_FILE:-${WORKDIR}/telegram-summary.sent}}"
+
+  mkdir -p "$WORKDIR"
+  chmod 700 "$WORKDIR" 2>/dev/null || true
+  touch "$COOKIE_FILE"
+  chmod 600 "$COOKIE_FILE" 2>/dev/null || true
+  if [[ -n "$LOG_FILE" ]]; then
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+  fi
+}
+
+check_dependencies() {
+  local missing=()
+  for bin in curl jq date find flock grep sed awk; do
+    command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
+  done
+  [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
+}
+
+json_get() {
+  local url="$1"
+  curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
+    -A "$USER_AGENT" -b "$COOKIE_FILE" -c "$COOKIE_FILE" "$url"
+}
+
+json_get_with_mamid() {
+  local url="$1"
+  curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
+    -A "$USER_AGENT" -b "mam_id=${MAM_ID}" -c "$COOKIE_FILE" "$url"
+}
+
+# shellcheck source=lib/donations.sh
+source "${SCRIPT_DIR}/lib/donations.sh"
 
 refresh_user_summary() {
   local response
@@ -305,7 +303,7 @@ send_telegram_message() {
 }
 
 send_daily_telegram_summary() {
-  local target_date purchase_count=0 vip_count=0 vip_points=0 wedge_count=0 wedge_points=0 upload_gb=0 upload_points=0 total_points=0
+  local target_date purchase_count=0 vip_count=0 vip_points=0 wedge_count=0 wedge_points=0 upload_gb=0 upload_points=0 donation_count=0 donation_points=0 total_points=0
   local date_field type quantity cost message
 
   truthy "${TELEGRAM_DAILY_SUMMARY:-0}" || return 0
@@ -325,18 +323,10 @@ send_daily_telegram_summary() {
     purchase_count=$((purchase_count + 1))
     total_points=$((total_points + cost))
     case "$type" in
-      vip)
-        vip_count=$((vip_count + 1))
-        vip_points=$((vip_points + cost))
-        ;;
-      wedge)
-        wedge_count=$((wedge_count + quantity))
-        wedge_points=$((wedge_points + cost))
-        ;;
-      upload)
-        upload_gb=$((upload_gb + quantity))
-        upload_points=$((upload_points + cost))
-        ;;
+      vip) vip_count=$((vip_count + 1)); vip_points=$((vip_points + cost)) ;;
+      wedge) wedge_count=$((wedge_count + quantity)); wedge_points=$((wedge_points + cost)) ;;
+      upload) upload_gb=$((upload_gb + quantity)); upload_points=$((upload_points + cost)) ;;
+      donation) donation_count=$((donation_count + 1)); donation_points=$((donation_points + cost)) ;;
     esac
   done < "$PURCHASE_LOG_FILE"
 
@@ -346,6 +336,7 @@ send_daily_telegram_summary() {
 VIP purchases: ${vip_count}, points spent: ${vip_points}
 Wedges: ${wedge_count}, points spent: ${wedge_points}
 Upload credit: ${upload_gb}GB, points spent: ${upload_points}
+Donations: ${donation_count}, points spent: ${donation_points}
 Total points spent: ${total_points}"
 
   send_telegram_message "$message"
@@ -424,12 +415,11 @@ buy_vip_if_enabled() {
   }
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
   if [[ "$success" == "true" ]]; then
-    log "VIP purchased/extended. Refreshing points."
     refreshed_points="$(get_points "$MAM_UID")"
     cost=$((before - refreshed_points))
     [[ "$cost" -lt 0 ]] && cost=0
     record_purchase vip max "$cost"
-    log "Points after VIP step: ${refreshed_points}"
+    log "VIP purchased/extended. Points after VIP step: ${refreshed_points}"
     printf '%s\n' "$refreshed_points"
   else
     warn "VIP purchase was not confirmed: $result"
@@ -471,15 +461,14 @@ buy_wedge_if_needed() {
   [[ "$success" == "true" ]] || warn "Wedge response does not report success=true: $result"
   touch "$WEDGE_STATE_FILE"
   record_purchase wedge 1 "$WEDGE_COST"
-  log "Wedge purchased. Refreshing points."
   refreshed_points="$(get_points "$MAM_UID")"
-  log "Points after wedge step: ${refreshed_points}"
+  log "Wedge purchased. Points after wedge step: ${refreshed_points}"
   printf '%s\n' "$refreshed_points"
 }
 
 buy_upload_until_buffer() {
   local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio
-  [[ "$MIN_UPLOAD_GB" =~ ^[0-9]+$ ]] || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
+  valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
   valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
 
   if ! number_le_zero "$UPLOAD_RATIO_THRESHOLD"; then
@@ -501,7 +490,7 @@ buy_upload_until_buffer() {
   fi
 
   for pack in $UPLOAD_PACKS; do
-    [[ "$pack" =~ ^[0-9]+$ ]] || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
+    valid_integer "$pack" || fatal "UPLOAD_PACKS contains a non-numeric value: $pack"
 
     if [[ "$pack" -lt "$MIN_UPLOAD_GB" ]]; then
       log "Skipping ${pack}GB upload package because automated purchases require at least ${MIN_UPLOAD_GB}GB."
@@ -538,7 +527,6 @@ buy_upload_until_buffer() {
   done
 
   if [[ "$DRY_RUN" -eq 0 ]]; then
-    log "Refreshing points after upload step."
     refreshed_points="$(get_points "$MAM_UID")"
     log "Points after upload step: ${refreshed_points}"
     printf '%s\n' "$refreshed_points"
@@ -548,8 +536,7 @@ buy_upload_until_buffer() {
 }
 
 manual_vip_step() {
-  local points="$1" option cost now result success error_message before refreshed_points actual_cost current_class
-  local max_suffix=""
+  local points="$1" option cost now result success error_message before refreshed_points actual_cost current_class max_suffix=""
   valid_integer "$VIP_BLOCK_COST" || fatal "VIP_BLOCK_COST must be numeric: $VIP_BLOCK_COST"
 
   refresh_user_summary || {
@@ -564,59 +551,26 @@ manual_vip_step() {
     return 0
   fi
 
-  log "Manual step 1/3 - VIP"
+  log "Manual step 1/4 - VIP"
   log "Current class: ${current_class}. Current points: ${points}. VIP options are 4, 8, 12 weeks, or max. Cost is ${VIP_BLOCK_COST} points per 4-week block."
-  log "Purchasable VIP durations with the current balance:"
-  if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
-    log " - 4 weeks: available, cost ${VIP_BLOCK_COST} points."
-  else
-    log " - 4 weeks: unavailable, requires ${VIP_BLOCK_COST} points."
-  fi
-  if [[ "$points" -ge $((VIP_BLOCK_COST * 2)) ]]; then
-    log " - 8 weeks: available, cost $((VIP_BLOCK_COST * 2)) points."
-  else
-    log " - 8 weeks: unavailable, requires $((VIP_BLOCK_COST * 2)) points."
-  fi
-  if [[ "$points" -ge $((VIP_BLOCK_COST * 3)) ]]; then
-    log " - 12 weeks: available, cost $((VIP_BLOCK_COST * 3)) points."
-  else
-    log " - 12 weeks: unavailable, requires $((VIP_BLOCK_COST * 3)) points."
-  fi
-  if [[ "$points" -ge "$VIP_BLOCK_COST" ]]; then
-    log " - max: available; the API will buy the maximum valid duration up to the 90-day limit."
-    max_suffix=", max"
-  else
-    log " - max: unavailable, requires at least ${VIP_BLOCK_COST} points."
-  fi
 
+  [[ "$points" -ge "$VIP_BLOCK_COST" ]] && max_suffix=", max"
   while true; do
     read -r -p "Choose VIP duration [0, 4, 8, 12${max_suffix}; Enter=0]: " option || option="0"
     option="${option:-0}"
     case "$option" in
-      0)
-        log "VIP skipped."
-        printf '%s\n' "$points"
-        return 0
-        ;;
+      0) log "VIP skipped."; printf '%s\n' "$points"; return 0 ;;
       4|8|12)
         cost=$((option * VIP_BLOCK_COST / 4))
-        if [[ "$points" -lt "$cost" ]]; then
-          warn "Not enough points for ${option} weeks. Required: ${cost}."
-          continue
-        fi
+        [[ "$points" -ge "$cost" ]] || { warn "Not enough points for ${option} weeks. Required: ${cost}."; continue; }
         break
         ;;
       max)
+        [[ "$points" -ge "$VIP_BLOCK_COST" ]] || { warn "Not enough points for max. Required minimum: ${VIP_BLOCK_COST}."; continue; }
         cost=0
-        if [[ "$points" -lt "$VIP_BLOCK_COST" ]]; then
-          warn "Not enough points for max. Required minimum: ${VIP_BLOCK_COST}."
-          continue
-        fi
         break
         ;;
-      *)
-        warn "Please enter 0, 4, 8, 12 or max."
-        ;;
+      *) warn "Please enter 0, 4, 8, 12 or max." ;;
     esac
   done
 
@@ -639,11 +593,7 @@ manual_vip_step() {
   [[ "$success" == "true" ]] || fatal "VIP purchase was not confirmed. API error: ${error_message:-none}. Response: $result"
   refreshed_points="$(get_points "$MAM_UID")"
   actual_cost=$((before - refreshed_points))
-  if [[ "$actual_cost" -lt 0 && "$option" != "max" ]]; then
-    actual_cost="$cost"
-  elif [[ "$actual_cost" -lt 0 ]]; then
-    actual_cost=0
-  fi
+  [[ "$actual_cost" -lt 0 ]] && actual_cost=0
   record_purchase vip "$option" "$actual_cost"
   log "VIP purchased/extended: duration=${option}."
   printf '%s\n' "$refreshed_points"
@@ -654,7 +604,7 @@ manual_wedge_step() {
   valid_integer "$WEDGE_COST" || fatal "WEDGE_COST must be numeric: $WEDGE_COST"
   valid_integer "$WEDGE_RESERVE_AFTER" || fatal "WEDGE_RESERVE_AFTER must be numeric: $WEDGE_RESERVE_AFTER"
 
-  log "Manual step 2/3 - Wedges"
+  log "Manual step 2/4 - Wedges"
   spendable=0
   [[ "$points" -gt "$WEDGE_RESERVE_AFTER" ]] && spendable=$((points - WEDGE_RESERVE_AFTER))
   max_wedges=$((spendable / WEDGE_COST))
@@ -684,10 +634,15 @@ manual_wedge_step() {
 }
 
 manual_upload_step() {
-  local points="$1" pack pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost
+  local points="$1" pack pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost current_ratio
   valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
 
-  log "Manual step 3/3 - Upload credit"
+  log "Manual step 3/4 - Upload credit"
+  if current_ratio="$(get_ratio "$MAM_UID")"; then
+    log "Current ratio: ${current_ratio}. Configured automated threshold: ${UPLOAD_RATIO_THRESHOLD}. Manual mode does not block upload purchases by ratio."
+  else
+    warn "Could not read current ratio. Manual upload purchase remains available."
+  fi
   log "Current points: ${points}. Automated upload minimum: ${MIN_UPLOAD_GB}GB."
   log "Purchasable upload packages with the current balance:"
 
@@ -752,6 +707,8 @@ run_manual_mode() {
   log "Points after wedge step: ${points}"
   points="$(manual_upload_step "$points" | tail -n1)"
   log "Points after upload step: ${points}"
+  points="$(manual_donation_step "$points" | tail -n1)"
+  log "Points after donation step: ${points}"
   log "Interactive manual mode completed. Final estimated/current points: ${points}"
 }
 
@@ -779,6 +736,8 @@ run_main() {
     log "Automated balance after wedge step: ${POINTS}"
     POINTS="$(buy_upload_until_buffer "$POINTS" | tail -n1)"
     log "Automated balance after upload step: ${POINTS}"
+    POINTS="$(donate_to_new_users_if_enabled "$POINTS" | tail -n1)"
+    log "Automated balance after donation step: ${POINTS}"
     log "Done. Final estimated/current points: ${POINTS}"
   fi
 
