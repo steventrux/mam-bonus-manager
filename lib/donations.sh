@@ -50,14 +50,48 @@ get_new_users() {
     | awk -F '\t' 'NF >= 2 && !seen[$1]++ { print $1 "\t" $2 }'
 }
 
+human_size_to_bytes() {
+  local value="$1"
+
+  awk '
+    BEGIN { IGNORECASE = 1 }
+    {
+      amount = $1 + 0
+      unit = $2
+
+      if (unit == "KiB") multiplier = 1024
+      else if (unit == "MiB") multiplier = 1024 * 1024
+      else if (unit == "GiB") multiplier = 1024 * 1024 * 1024
+      else if (unit == "TiB") multiplier = 1024 * 1024 * 1024 * 1024
+      else if (unit == "B") multiplier = 1
+      else exit 1
+
+      printf "%.0f\n", amount * multiplier
+    }
+  ' <<< "$value"
+}
+
 get_recipient_uploaded_bytes() {
   local uid="$1"
-  local response uploaded_bytes
+  local response uploaded_bytes uploaded_text converted
 
   response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+
   uploaded_bytes="$(jq -r '.uploaded_bytes // empty' <<< "$response" 2>/dev/null || true)"
-  valid_integer "$uploaded_bytes" || return 1
-  printf '%s\n' "$uploaded_bytes"
+  if valid_integer "$uploaded_bytes"; then
+    printf '%s\n' "$uploaded_bytes"
+    return 0
+  fi
+
+  uploaded_text="$(jq -r '.uploaded // empty' <<< "$response" 2>/dev/null || true)"
+  if [[ -n "$uploaded_text" && "$uploaded_text" != "null" ]]; then
+    converted="$(human_size_to_bytes "$uploaded_text")" || return 1
+    valid_integer "$converted" || return 1
+    printf '%s\n' "$converted"
+    return 0
+  fi
+
+  return 1
 }
 
 donation_recipient_upload_allowed() {
