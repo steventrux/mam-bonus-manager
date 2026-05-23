@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.2.4"
+VERSION="1.3.1"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
