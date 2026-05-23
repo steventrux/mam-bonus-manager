@@ -230,15 +230,18 @@ Manual mode includes:
 - Number of wedges to buy.
 - Donation amount per user and maximum total donation budget.
 
-### Configuration migration
+### Configuration migration and editing
 
 ```bash
 ./mam-bonus-manager.sh config
+./mam-bonus-manager.sh config edit
 ```
 
 The `config` command creates the configuration file if it does not exist, or migrates an existing one by adding newly introduced settings from `config/config.env.example`.
 
 Existing values are preserved. Obsolete settings such as `BUFFER`, `DONATION_BUFFER` and `WEDGE_RESERVE_AFTER` are commented out automatically so they cannot interfere with newer releases.
+
+Use `config edit` to migrate the file and then open it in an editor. The editor is selected from `$EDITOR`, then `nano`, then `vi`.
 
 ### Session and balance checks
 

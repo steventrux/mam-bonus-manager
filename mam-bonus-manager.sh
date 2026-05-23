@@ -5,6 +5,7 @@ VERSION="1.3.1"
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
+CONFIG_ACTION="migrate"
 VERBOSITY=1
 LOG_FILE=""
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +51,7 @@ Commands:
   check-session   Validate or recreate the MAM session only.
   points          Show the current seedbonus balance only.
   config          Create or migrate the configuration file from config.env.example.
+  config edit     Create/migrate the configuration file, then open it in an editor.
   help            Show this help message.
 
 Options:
@@ -66,7 +68,20 @@ parse_args() {
       --dry-run) DRY_RUN=1; shift ;;
       --version) echo "$VERSION"; exit 0 ;;
       -h|--help|help) COMMAND="help"; shift ;;
-      run|manual|interactive|check-session|points|config) COMMAND="$1"; shift ;;
+      config)
+        COMMAND="config"
+        CONFIG_ACTION="${2:-migrate}"
+        case "$CONFIG_ACTION" in
+          migrate|edit) ;;
+          *) fatal "Unknown config action: ${CONFIG_ACTION}. Supported: migrate, edit." ;;
+        esac
+        if [[ $# -gt 1 ]]; then
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      run|manual|interactive|check-session|points) COMMAND="$1"; shift ;;
       *) fatal "Unknown argument: $1" ;;
     esac
   done
@@ -207,6 +222,26 @@ check_dependencies() {
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
+}
+
+config_edit() {
+  local editor
+
+  config_migrate
+
+  editor="${EDITOR:-}"
+  if [[ -z "$editor" ]]; then
+    if command -v nano >/dev/null 2>&1; then
+      editor="nano"
+    elif command -v vi >/dev/null 2>&1; then
+      editor="vi"
+    else
+      fatal "No editor found. Set EDITOR or install nano/vi."
+    fi
+  fi
+
+  log "Opening configuration file with: ${editor}"
+  "$editor" "$CONFIG_FILE"
 }
 
 config_migrate() {
@@ -825,7 +860,11 @@ run_main() {
   check_dependencies
 
   if [[ "$COMMAND" == "config" ]]; then
-    config_migrate
+    case "$CONFIG_ACTION" in
+      migrate) config_migrate ;;
+      edit) config_edit ;;
+      *) fatal "Unknown config action: ${CONFIG_ACTION}" ;;
+    esac
     return 0
   fi
 
