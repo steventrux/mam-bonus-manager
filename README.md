@@ -75,13 +75,13 @@ Manual donations show the number of available candidates after cooldown and uplo
 
 ```bash
 sudo mkdir -p /etc/mam-bonus-manager /opt/MAM
-sudo cp config/config.env.example /etc/mam-bonus-manager/config.env
-sudo nano /etc/mam-bonus-manager/config.env
-sudo chmod 600 /etc/mam-bonus-manager/config.env
 sudo chmod 700 /opt/MAM
 chmod +x mam-bonus-manager.sh scripts/donation-planner.sh
-./mam-bonus-manager.sh --dry-run run
+sudo MAM_CONFIG=/etc/mam-bonus-manager/config.env ./mam-bonus-manager.sh config edit
+sudo MAM_CONFIG=/etc/mam-bonus-manager/config.env ./mam-bonus-manager.sh --dry-run run
 ```
+
+The `config edit` command creates or migrates the configuration file, makes a backup when needed, and opens the file in an editor.
 
 Dependencies:
 
@@ -100,10 +100,10 @@ The production configuration file should stay outside git:
 /etc/mam-bonus-manager/config.env
 ```
 
-For local testing, start from the example file:
+For local testing, let the script create or migrate the file:
 
 ```bash
-cp config/config.env.example config.env
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh config edit
 ```
 
 Most variables can also be overridden with the `MAM_` prefix. For example, `BONUS_RESERVE_POINTS` can be overridden by `MAM_BONUS_RESERVE_POINTS`, `VIP` by `MAM_VIP`, and `UPLOAD_RATIO_THRESHOLD` by `MAM_UPLOAD_RATIO_THRESHOLD`.
@@ -239,7 +239,7 @@ Manual mode includes:
 
 The `config` command creates the configuration file if it does not exist, or migrates an existing one by adding newly introduced settings from `config/config.env.example`.
 
-Existing values are preserved. Obsolete settings such as `BUFFER`, `DONATION_BUFFER` and `WEDGE_RESERVE_AFTER` are commented out automatically so they cannot interfere with newer releases.
+Existing values are preserved. Settings that are no longer user-configurable are commented out automatically so they cannot interfere with newer releases.
 
 Use `config edit` to migrate the file and then open it in an editor. The editor is selected from `$EDITOR`, then `nano`, then `vi`.
 
@@ -280,12 +280,11 @@ Use the main script without `--dry-run` only when you want to send real purchase
 Use this workflow to test without writing to `/etc` or `/opt`:
 
 ```bash
-cp config/config.env.example ./config.env
-chmod 600 ./config.env
 mkdir -p .mam-workdir
+MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh config edit
 ```
 
-Edit `./config.env`:
+At minimum, check these values in `./config.env`:
 
 ```bash
 MAM_ID="your_real_mam_id"
@@ -312,6 +311,7 @@ Docker is supported as an alternative to local/systemd installation.
 
 - The container does not expose ports.
 - Configuration is read from `/config/config.env`.
+- Mount `/config` read-write if you want to use the built-in `config` or `config edit` migration commands from inside the container.
 - `/data` is the persistent `WORKDIR` for cookies, lock files, state files and purchase history.
 - With Docker, set `WORKDIR="/data"` in `config.env`.
 
@@ -319,6 +319,11 @@ One-off examples:
 
 ```bash
 docker run --rm ghcr.io/steventrux/mam-bonus-manager:latest --version
+docker run --rm -it \
+  -v "$PWD/docker-config:/config" \
+  -v "$PWD/docker-data:/data" \
+  ghcr.io/steventrux/mam-bonus-manager:latest config edit
+
 docker run --rm -it \
   -v "$PWD/docker-config:/config" \
   -v "$PWD/docker-data:/data" \
