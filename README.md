@@ -12,7 +12,7 @@ It can validate the MAM session, read the current seedbonus balance, buy VIP, bu
 - Automated wedge purchases at a configurable interval.
 - Automated upload credit purchases using configurable package sizes.
 - Optional upload ratio guard: upload credit is bought only if the account ratio is below `UPLOAD_RATIO_THRESHOLD`.
-- Donations to new users, with amount, buffer, cooldown, max-users-per-run and uploaded-amount filtering.
+- Donations to new users, with amount, buffer, cooldown, max-users-per-run, uploaded-amount filtering and per-user total limit.
 - Interactive manual mode for VIP, wedges, upload credit and donations.
 - Dedicated `--dry-run` mode for safe testing.
 - Configurable point buffers for upload and donation logic.
@@ -38,7 +38,7 @@ Automated mode runs the steps in this order:
 
 The upload step is controlled by both point availability and ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
 
-The donation step runs after VIP, wedge and upload credit. It uses only points above `DONATION_BUFFER`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`, and filters recipients by uploaded amount using `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`.
+The donation step runs after VIP, wedge and upload credit. It uses only points above `DONATION_BUFFER`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`, filters recipients by uploaded amount using `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`, and caps the cumulative amount sent to each user with `DONATION_MAX_POINTS_PER_USER`.
 
 With `--dry-run`, donations are only printed. Without `--dry-run`, the script sends real donations through MAM and then records successful donations in `DONATION_STATE_FILE` and `PURCHASE_LOG_FILE`.
 
@@ -149,11 +149,12 @@ Automated upload purchases require both enough points above `BUFFER` and, unless
 | `DONATION_AMOUNT` | `100` | Points donated per user in automated donation mode. |
 | `DONATION_BUFFER` | `5000` | Points to keep untouched before sending donations. |
 | `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum new-user donation candidates per automatic run. |
+| `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
 
-Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, and sends donations only while enough points remain above the configured donation buffer.
+Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above the configured donation buffer.
 
 ### Notification settings
 
