@@ -12,10 +12,10 @@ It can validate the MAM session, read the current seedbonus balance, buy VIP, bu
 - Automated wedge purchases at a configurable interval.
 - Automated upload credit purchases using configurable package sizes.
 - Optional upload ratio guard: upload credit is bought only if the account ratio is below `UPLOAD_RATIO_THRESHOLD`.
-- Donations to new users, with amount, buffer, cooldown, max-users-per-run, uploaded-amount filtering and per-user total limit.
+- Donations to new users, with amount, cooldown, max-users-per-run, uploaded-amount filtering and per-user total limit.
 - Interactive manual mode for VIP, wedges, upload credit and donations.
 - Dedicated `--dry-run` mode for safe testing.
-- Configurable point buffers for upload and donation logic.
+- Configurable global reserve for automated upload, wedge and donation logic.
 - Purchase and donation history in TSV format.
 - Daily Telegram summary, optional.
 - Heartbeat URL support, optional.
@@ -31,14 +31,14 @@ Automated mode runs the steps in this order:
 
 ```text
 1. VIP
-2. Wedge
-3. Upload credit
+2. Upload credit
+3. Wedge
 4. Donations to new users
 ```
 
-The upload step is controlled by both point availability and ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
+The upload step is controlled by point availability, the global reserve and the ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
 
-The donation step runs after VIP, wedge and upload credit. It uses only points above `DONATION_BUFFER`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`, filters recipients by uploaded amount using `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`, and caps the cumulative amount sent to each user with `DONATION_MAX_POINTS_PER_USER`.
+The donation step runs after VIP, upload credit and wedge. It uses only points above `BONUS_RESERVE_POINTS`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`, filters recipients by uploaded amount using `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`, and caps the cumulative amount sent to each user with `DONATION_MAX_POINTS_PER_USER`.
 
 With `--dry-run`, donations are only printed. Without `--dry-run`, the script sends real donations through MAM and then records successful donations in `DONATION_STATE_FILE` and `PURCHASE_LOG_FILE`.
 
@@ -48,8 +48,8 @@ Manual mode runs the steps in this order:
 
 ```text
 1. VIP
-2. Wedge
-3. Upload credit
+2. Upload credit
+3. Wedge
 4. Donations to new users
 ```
 
@@ -92,7 +92,7 @@ Start from the example file:
 cp config/config.env.example config.env
 ```
 
-Most variables can also be overridden with the `MAM_` prefix. For example, `BUFFER` can be overridden by `MAM_BUFFER`, `VIP` by `MAM_VIP`, and `UPLOAD_RATIO_THRESHOLD` by `MAM_UPLOAD_RATIO_THRESHOLD`.
+Most variables can also be overridden with the `MAM_` prefix. For example, `BONUS_RESERVE_POINTS` can be overridden by `MAM_BONUS_RESERVE_POINTS`, `VIP` by `MAM_VIP`, and `UPLOAD_RATIO_THRESHOLD` by `MAM_UPLOAD_RATIO_THRESHOLD`.
 
 ### Required session settings
 
@@ -112,6 +112,14 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BUFF
 | `CURL_RETRIES` | `3` | Number of curl retries. |
 | `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.4` | User-Agent sent to MAM. |
 
+### Global reserve settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `BONUS_RESERVE_POINTS` | `55000` | Global reserve used by automated upload credit, wedge and donation steps. The default 55k reserve is intended to preserve enough points for the maximum VIP purchase shown by MAM, but it can be lowered or raised according to each user's preferences. |
+
+VIP is evaluated before the reserve is applied to the other automated spending steps. Manual mode does not enforce this reserve, because the user confirms each action step by step.
+
 ### VIP settings
 
 | Variable | Default | Description |
@@ -128,18 +136,16 @@ Automatic VIP is available only for eligible account classes reported by MAM. Th
 | --- | ---: | --- |
 | `WEDGE_HOURS` | `4` | Buy one wedge every N hours. Set to `0` to disable automatic wedges. |
 | `WEDGE_COST` | `50000` | Wedge cost in bonus points. |
-| `WEDGE_RESERVE_AFTER` | `5000` | Minimum points to keep after wedge purchases. |
 
 ### Upload credit settings
 
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `BUFFER` | `55000` | Points to keep untouched before buying upload credit in automated mode. |
 | `MIN_UPLOAD_GB` | `50` | Minimum upload package size allowed for automated purchases. |
 | `UPLOAD_PACKS` | `100 50` | Upload credit package sizes to try, from largest to smallest, in GB. |
 | `UPLOAD_RATIO_THRESHOLD` | `2.5` | Buy upload credit only if current ratio is below this value. Set to `0` to disable. |
 
-Automated upload purchases require both enough points above `BUFFER` and, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`.
+Automated upload purchases require enough points above `BONUS_RESERVE_POINTS` and, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`.
 
 ### Donation settings
 
@@ -147,7 +153,6 @@ Automated upload purchases require both enough points above `BUFFER` and, unless
 | --- | ---: | --- |
 | `DONATIONS` | `0` | Set to `1` to enable the automated donation step and donation planner. |
 | `DONATION_AMOUNT` | `100` | Points donated per user in automated donation mode. |
-| `DONATION_BUFFER` | `5000` | Points to keep untouched before sending donations. |
 | `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum new-user donation candidates per automatic run. |
 | `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
@@ -160,7 +165,7 @@ Automated upload purchases require both enough points above `BUFFER` and, unless
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
 
-Donation discovery can run in uid_scan mode or page mode. The default uid_scan mode scans user IDs backward from a calculated start UID, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above the configured donation buffer.
+Donation discovery can run in uid_scan mode or page mode. The default uid_scan mode scans user IDs backward from a calculated start UID, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above `BONUS_RESERVE_POINTS`.
 
 ### Notification settings
 
@@ -231,7 +236,7 @@ The planner:
 
 1. validates or recreates the MAM session;
 2. reads the current point balance;
-3. keeps `DONATION_BUFFER` untouched;
+3. keeps `BONUS_RESERVE_POINTS` untouched;
 4. reads new-user candidates;
 5. applies the local cooldown history;
 6. prints the donations it would make.

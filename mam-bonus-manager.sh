@@ -702,15 +702,15 @@ manual_upload_step() {
 run_manual_mode() {
   local points="$1"
   log "Interactive manual mode started. Each step shows the currently purchasable quantity before asking for input."
-  log "Manual mode does not apply the automated upload buffer. It only prevents spending more points than currently available."
+  log "Manual mode does not apply the automated global reserve. It only prevents spending more points than currently available."
   [[ "$DRY_RUN" -eq 1 ]] && log "DRY-RUN is enabled: no purchase will be sent to MAM."
 
   points="$(manual_vip_step "$points" | tail -n1)"
   log "Points after VIP step: ${points}"
-  points="$(manual_wedge_step "$points" | tail -n1)"
-  log "Points after wedge step: ${points}"
   points="$(manual_upload_step "$points" | tail -n1)"
   log "Points after upload step: ${points}"
+  points="$(manual_wedge_step "$points" | tail -n1)"
+  log "Points after wedge step: ${points}"
   points="$(manual_donation_step "$points" | tail -n1)"
   log "Points after donation step: ${points}"
   log "Interactive manual mode completed. Final estimated/current points: ${points}"
