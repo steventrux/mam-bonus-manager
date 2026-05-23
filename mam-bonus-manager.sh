@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.3.1"
+VERSION="1.3.2"
 VIP_BLOCK_COST=5000
 WEDGE_COST=50000
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
