@@ -44,8 +44,8 @@ Usage:
   ./mam-bonus-manager.sh [options] [command]
 
 Commands:
-  run             Run the automated cycle: session, VIP, wedge, upload credit, donations. Default.
-  manual          Interactive manual mode: choose VIP, wedges, upload credit and donations step by step.
+  run             Run the automated cycle: session, VIP, upload credit, wedge, donations. Default.
+  manual          Interactive manual mode: choose VIP, upload credit, wedges and donations step by step.
   interactive     Alias of manual.
   check-session   Validate or recreate the MAM session only.
   points          Show the current seedbonus balance only.
@@ -144,7 +144,7 @@ load_config() {
 
   WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
   BONUS_RESERVE_POINTS="${MAM_BONUS_RESERVE_POINTS:-${BONUS_RESERVE_POINTS:-55000}}"
-  VIP="${MAM_VIP:-${VIP:-0}}"
+  VIP="${MAM_VIP:-${VIP:-1}}"
   VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
   VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
   WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-0}}}"

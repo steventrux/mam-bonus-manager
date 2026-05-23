@@ -138,7 +138,7 @@ VIP is evaluated before the reserve is applied to the other automated spending s
 
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `VIP` | `0` | Set to `1` to enable automatic VIP purchase or extension. |
+| `VIP` | `1` | Set to `1` to enable automatic VIP purchase or extension. Set to `0` to disable the VIP step. |
 | `VIP_BLOCK_COST` | `5000` | Cost of one 4-week VIP block. |
 | `VIP_THRESHOLD_WEEKS` | `11` | If already VIP, automatic extension runs only when VIP expires within this many weeks. |
 
@@ -278,7 +278,7 @@ Edit `./config.env`:
 MAM_ID="your_real_mam_id"
 WORKDIR="$PWD/.mam-workdir"
 BONUS_RESERVE_POINTS=55000
-VIP=0
+VIP=1
 WEDGE_HOURS=0
 DONATIONS=1
 ```
