@@ -143,13 +143,12 @@ load_config() {
   MAM_ID_FILE="${MAM_TOKEN_FILE:-${MAM_ID_FILE:-}}"
 
   WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
-  BUFFER="${MAM_BUFFER:-${BUFFER:-55000}}"
+  BONUS_RESERVE_POINTS="${MAM_BONUS_RESERVE_POINTS:-${BONUS_RESERVE_POINTS:-55000}}"
   VIP="${MAM_VIP:-${VIP:-0}}"
   VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
   VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
   WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-4}}}"
   WEDGE_COST="${MAM_WEDGE_COST:-${WEDGE_COST:-50000}}"
-  WEDGE_RESERVE_AFTER="${MAM_WEDGE_RESERVE_AFTER:-${WEDGE_RESERVE_AFTER:-5000}}"
   CURL_TIMEOUT="${MAM_CURL_TIMEOUT:-${CURL_TIMEOUT:-30}}"
   CURL_RETRIES="${MAM_CURL_RETRIES:-${CURL_RETRIES:-3}}"
   USER_AGENT="${MAM_USER_AGENT:-${USER_AGENT:-Mozilla/5.0 mam-bonus-manager/${VERSION}}}"
@@ -159,7 +158,6 @@ load_config() {
 
   DONATIONS="${MAM_DONATIONS:-${DONATIONS:-0}}"
   DONATION_AMOUNT="${MAM_DONATION_AMOUNT:-${DONATION_AMOUNT:-100}}"
-  DONATION_BUFFER="${MAM_DONATION_BUFFER:-${DONATION_BUFFER:-5000}}"
   DONATION_MAX_USERS_PER_RUN="${MAM_DONATION_MAX_USERS_PER_RUN:-${DONATION_MAX_USERS_PER_RUN:-5}}"
   DONATION_MAX_POINTS_PER_USER="${MAM_DONATION_MAX_POINTS_PER_USER:-${DONATION_MAX_POINTS_PER_USER:-1000}}"
   DONATION_COOLDOWN_DAYS="${MAM_DONATION_COOLDOWN_DAYS:-${DONATION_COOLDOWN_DAYS:-30}}"
@@ -449,9 +447,9 @@ buy_wedge_if_needed() {
     return 0
   fi
 
-  min_points=$((WEDGE_COST + WEDGE_RESERVE_AFTER))
+  min_points=$((WEDGE_COST + BONUS_RESERVE_POINTS))
   if [[ "$points" -lt "$min_points" ]]; then
-    log "A wedge is due, but there are not enough points: ${points}. Required minimum: ${min_points}."
+    log "A wedge is due, but there are not enough points above reserve: ${points}. Required minimum: ${min_points}."
     printf '%s\n' "$points"
     return 0
   fi
@@ -506,7 +504,7 @@ buy_upload_until_buffer() {
     fi
 
     pack_cost=$((pack * 500))
-    required=$((pack_cost + BUFFER))
+    required=$((pack_cost + BONUS_RESERVE_POINTS))
     log "Checking ${pack}GB upload package. Purchase threshold: > ${required} points."
 
     while [[ "$points" -gt "$required" ]]; do
@@ -610,13 +608,11 @@ manual_vip_step() {
 manual_wedge_step() {
   local points="$1" spendable max_wedges count i now result success error_message estimated_cost
   valid_integer "$WEDGE_COST" || fatal "WEDGE_COST must be numeric: $WEDGE_COST"
-  valid_integer "$WEDGE_RESERVE_AFTER" || fatal "WEDGE_RESERVE_AFTER must be numeric: $WEDGE_RESERVE_AFTER"
 
   log "Manual step 2/4 - Wedges"
-  spendable=0
-  [[ "$points" -gt "$WEDGE_RESERVE_AFTER" ]] && spendable=$((points - WEDGE_RESERVE_AFTER))
+  spendable="$points"
   max_wedges=$((spendable / WEDGE_COST))
-  log "Current points: ${points}. Wedge cost: ${WEDGE_COST}. Reserve after wedge purchases: ${WEDGE_RESERVE_AFTER}. Purchasable wedges: ${max_wedges}."
+  log "Current points: ${points}. Wedge cost: ${WEDGE_COST}. Manual mode does not apply the automated global reserve. Purchasable wedges: ${max_wedges}."
 
   count="$(ask_integer "Buy how many wedge(s)? [0-${max_wedges}, Enter=0]: " "$max_wedges")"
   [[ "$count" -eq 0 ]] && { log "Wedges skipped."; printf '%s\n' "$points"; return 0; }
@@ -731,6 +727,8 @@ run_main() {
   [[ "$COMMAND" == "check-session" ]] && return 0
 
   log "Fetching current points."
+  valid_integer "$BONUS_RESERVE_POINTS" || fatal "BONUS_RESERVE_POINTS must be numeric: $BONUS_RESERVE_POINTS"
+
   POINTS="$(get_points "$MAM_UID")"
   log "Current points: ${POINTS}"
   [[ "$COMMAND" == "points" ]] && return 0
@@ -740,10 +738,10 @@ run_main() {
   else
     POINTS="$(buy_vip_if_enabled "$POINTS" | tail -n1)"
     log "Automated balance after VIP step: ${POINTS}"
-    POINTS="$(buy_wedge_if_needed "$POINTS" | tail -n1)"
-    log "Automated balance after wedge step: ${POINTS}"
     POINTS="$(buy_upload_until_buffer "$POINTS" | tail -n1)"
     log "Automated balance after upload step: ${POINTS}"
+    POINTS="$(buy_wedge_if_needed "$POINTS" | tail -n1)"
+    log "Automated balance after wedge step: ${POINTS}"
     POINTS="$(donate_to_new_users_if_enabled "$POINTS" | tail -n1)"
     log "Automated balance after donation step: ${POINTS}"
     log "Done. Final estimated/current points: ${POINTS}"

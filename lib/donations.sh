@@ -340,17 +340,16 @@ donate_to_new_users_if_enabled() {
   truthy "${DONATIONS:-0}" || { printf '%s\n' "$points"; return 0; }
 
   valid_integer "$DONATION_AMOUNT" || fatal "DONATION_AMOUNT must be numeric: $DONATION_AMOUNT"
-  valid_integer "$DONATION_BUFFER" || fatal "DONATION_BUFFER must be numeric: $DONATION_BUFFER"
   valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
 
-  if [[ "$points" -le "$DONATION_BUFFER" ]]; then
-    log "Donation step skipped: points ${points} are not above DONATION_BUFFER ${DONATION_BUFFER}."
+  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
+    log "Donation step skipped: points ${points} are not above BONUS_RESERVE_POINTS ${BONUS_RESERVE_POINTS}."
     printf '%s\n' "$points"
     return 0
   fi
 
-  spendable=$((points - DONATION_BUFFER))
-  log "Donation step enabled. Spendable points above donation buffer: ${spendable}."
+  spendable=$((points - BONUS_RESERVE_POINTS))
+  log "Donation step enabled. Spendable points above global reserve: ${spendable}."
 
   while IFS=$'\t' read -r uid username; do
     [[ -n "$uid" && -n "$username" ]] || continue
@@ -367,7 +366,7 @@ donate_to_new_users_if_enabled() {
           points="$(get_points "$MAM_UID")"
         fi
         after="$points"
-        spendable=$((points - DONATION_BUFFER))
+        spendable=$((points - BONUS_RESERVE_POINTS))
         [[ "$spendable" -lt 0 ]] && spendable=0
         debug "Donation balance update: before=${before}, after=${after}, spendable=${spendable}."
       fi
