@@ -398,7 +398,11 @@ should_buy_vip() {
 
 buy_vip_if_enabled() {
   local points="$1" before now result success refreshed_points cost
-  truthy "$VIP" || { printf '%s\n' "$points"; return 0; }
+  if ! truthy "$VIP"; then
+    log "VIP step skipped: VIP=0."
+    printf '%s\n' "$points"
+    return 0
+  fi
 
   log "VIP is enabled: checking whether purchase is needed."
   if ! should_buy_vip; then
