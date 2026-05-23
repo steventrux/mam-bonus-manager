@@ -152,9 +152,15 @@ Automated upload purchases require both enough points above `BUFFER` and, unless
 | `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
+| `DONATION_DISCOVERY_MODE` | `uid_scan` | Candidate discovery mode. `uid_scan` scans user IDs backward; `page` tries the new-users page parser. |
+| `DONATION_SCAN_START_UID` | `279022` | Fallback starting UID for the first scan when no donation history exists yet. |
+| `DONATION_SCAN_START_OFFSET` | `5` | Offset added to the highest UID found in `DONATION_STATE_FILE` to calculate the next scan start. |
+| `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of UIDs to check while scanning backward. |
+| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by the scan. |
+| `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
 
-Donation discovery reads new-user candidates from MAM, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above the configured donation buffer.
+Donation discovery can run in uid_scan mode or page mode. The default uid_scan mode scans user IDs backward from a calculated start UID, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above the configured donation buffer.
 
 ### Notification settings
 
