@@ -50,39 +50,39 @@ get_new_users() {
     | awk -F '\t' 'NF >= 2 && !seen[$1]++ { print $1 "\t" $2 }'
 }
 
-get_recipient_points() {
+get_recipient_uploaded_bytes() {
   local uid="$1"
-  local response points
+  local response uploaded_bytes
 
   response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
-  points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
-  valid_number "$points" || return 1
-  int_part "$points"
+  uploaded_bytes="$(jq -r '.uploaded_bytes // empty' <<< "$response" 2>/dev/null || true)"
+  valid_integer "$uploaded_bytes" || return 1
+  printf '%s\n' "$uploaded_bytes"
 }
 
-donation_recipient_points_allowed() {
+donation_recipient_upload_allowed() {
   local uid="$1"
   local username="$2"
-  local threshold points
+  local threshold uploaded_bytes
 
-  threshold="${DONATION_MAX_RECIPIENT_POINTS:-10000}"
-  valid_integer "$threshold" || fatal "DONATION_MAX_RECIPIENT_POINTS must be numeric: $threshold"
+  threshold="${DONATION_MAX_RECIPIENT_UPLOADED_BYTES:-53687091200}"
+  valid_integer "$threshold" || fatal "DONATION_MAX_RECIPIENT_UPLOADED_BYTES must be numeric: $threshold"
 
   if [[ "$threshold" -le 0 ]]; then
     return 0
   fi
 
-  points="$(get_recipient_points "$uid")" || {
-    warn "Could not read recipient points for ${username} (uid=${uid}); skipping for safety."
+  uploaded_bytes="$(get_recipient_uploaded_bytes "$uid")" || {
+    warn "Could not read recipient uploaded bytes for ${username} (uid=${uid}); skipping for safety."
     return 1
   }
 
-  if [[ "$points" -lt "$threshold" ]]; then
-    debug "Donation candidate accepted for ${username} (uid=${uid}): recipient points ${points} < ${threshold}."
+  if [[ "$uploaded_bytes" -le "$threshold" ]]; then
+    debug "Donation candidate accepted for ${username} (uid=${uid}): uploaded_bytes ${uploaded_bytes} <= ${threshold}."
     return 0
   fi
 
-  log "Donation candidate skipped for ${username} (uid=${uid}): recipient points ${points} >= ${threshold}."
+  log "Donation candidate skipped for ${username} (uid=${uid}): uploaded_bytes ${uploaded_bytes} > ${threshold}."
   return 1
 }
 
@@ -96,7 +96,7 @@ get_donation_candidates() {
       debug "Donation candidate skipped for ${username} (uid=${uid}): cooldown active."
       continue
     fi
-    if ! donation_recipient_points_allowed "$uid" "$username"; then
+    if ! donation_recipient_upload_allowed "$uid" "$username"; then
       continue
     fi
     printf '%s\t%s\n' "$uid" "$username"
@@ -120,7 +120,7 @@ plan_donation() {
     return 1
   fi
 
-  if ! donation_recipient_points_allowed "$uid" "$username"; then
+  if ! donation_recipient_upload_allowed "$uid" "$username"; then
     return 1
   fi
 
@@ -221,7 +221,7 @@ manual_donation_step() {
   log "Manual step 4/4 - Donations to new users"
 
   candidate_count="$(count_donation_candidates)"
-  log "New-user donation candidates after cooldown and recipient-points filters: ${candidate_count}."
+  log "New-user donation candidates after cooldown and upload filters: ${candidate_count}."
 
   if [[ "$candidate_count" -eq 0 ]]; then
     log "No donation candidates available."
