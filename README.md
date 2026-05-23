@@ -1,27 +1,35 @@
 # mam-bonus-manager
 
-`mam-bonus-manager` is a configurable Bash tool for managing MyAnonamouse bonus points safely from a server, cron job, systemd timer or Docker container.
+`mam-bonus-manager` is a configurable Bash tool for managing MyAnonamouse bonus points from a local shell, server, cron job, systemd timer or Docker container.
 
-It can validate the MAM session, read the current seedbonus balance, buy VIP, buy wedges, buy upload credit, and donate bonus points to new users. All spending actions support `--dry-run`, so configuration changes can be tested before any real purchase or donation is sent.
+It validates the MAM session, reads the current seedbonus balance, and can automate VIP checks, upload-credit purchases, wedge purchases and bonus-point donations to new users. Every spending action supports `--dry-run`, so configuration changes can be tested before any real purchase or donation is sent.
 
 ## Features
 
+### Core
+
 - Session management using `MAM_ID` or `MAM_ID_FILE`.
 - Current seedbonus balance lookup.
-- Automated VIP purchase or extension for eligible account classes.
-- Automated wedge purchases at a configurable interval.
-- Automated upload credit purchases using configurable package sizes.
-- Optional upload ratio guard: upload credit is bought only if the account ratio is below `UPLOAD_RATIO_THRESHOLD`.
-- Donations to new users, with amount, cooldown, max-users-per-run, uploaded-amount filtering and per-user total limit.
-- Interactive manual mode for VIP, wedges, upload credit and donations.
 - Dedicated `--dry-run` mode for safe testing.
-- Configurable global reserve for automated upload, wedge and donation logic.
-- Purchase and donation history in TSV format.
-- Daily Telegram summary, optional.
-- Heartbeat URL support, optional.
 - Lock file with `flock` to prevent overlapping runs.
-- Docker, systemd and local shell usage.
 - Secrets, cookies and runtime state kept outside the repository.
+
+### Automated spending
+
+- VIP purchase or extension for eligible account classes.
+- Upload credit purchases using configurable package sizes.
+- Optional upload ratio guard through `UPLOAD_RATIO_THRESHOLD`.
+- Optional wedge purchases, disabled by default with `WEDGE_HOURS=0`.
+- Donations to new users with cooldown, candidate limits, uploaded-amount filtering and per-user total limit.
+- Single automated spending reserve through `BONUS_RESERVE_POINTS`.
+
+### Operations
+
+- Interactive manual mode for VIP, upload credit, wedges and donations.
+- Purchase and donation history in TSV format.
+- Optional daily Telegram summary.
+- Optional heartbeat URL support.
+- Docker, systemd and local shell usage.
 
 ## Current purchase flow
 
@@ -36,15 +44,19 @@ Automated mode runs the steps in this order:
 4. Donations to new users
 ```
 
-The upload step is controlled by point availability, the global reserve and the ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
+VIP is evaluated first. Automatic VIP purchases are attempted only when `VIP=1` and the current account class is eligible.
 
-The donation step runs after VIP, upload credit and wedge. It uses only points above `BONUS_RESERVE_POINTS`, skips users already present in `DONATION_STATE_FILE` within the cooldown window, limits the number of candidates with `DONATION_MAX_USERS_PER_RUN`, filters recipients by uploaded amount using `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`, and caps the cumulative amount sent to each user with `DONATION_MAX_POINTS_PER_USER`.
+Upload credit is controlled by point availability, `BONUS_RESERVE_POINTS` and the ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
 
-With `--dry-run`, donations are only printed. Without `--dry-run`, the script sends real donations through MAM and then records successful donations in `DONATION_STATE_FILE` and `PURCHASE_LOG_FILE`.
+Wedges are disabled by default. Set `WEDGE_HOURS` to a value greater than `0` to enable automatic wedge purchases. The automated wedge step also respects `BONUS_RESERVE_POINTS`.
+
+Donations run last and use only points above `BONUS_RESERVE_POINTS`. They also apply cooldown history, max candidates per run, recipient uploaded-amount filtering and the cumulative per-user donation limit.
+
+With `--dry-run`, purchases and donations are only printed. Without `--dry-run`, enabled spending actions are sent to MAM and successful actions are recorded in the local TSV history files.
 
 ### Manual mode
 
-Manual mode runs the steps in this order:
+Manual mode runs the same steps in the same order:
 
 ```text
 1. VIP
@@ -53,9 +65,11 @@ Manual mode runs the steps in this order:
 4. Donations to new users
 ```
 
+Manual mode does not enforce the automated global reserve. It shows the available choices at each step and asks before each action, so the user decides how many points to spend.
+
 Manual upload shows the current ratio and the configured automatic ratio threshold, but it does **not** block the manual purchase based on the ratio. The threshold is binding only in automated mode.
 
-Manual donations show the number of available new-user candidates after cooldown and uploaded-amount filtering. You then choose how many points to donate to each user and the maximum total budget for that manual run. With `--dry-run`, the selected donations are only printed. Without `--dry-run`, they are sent for real.
+Manual donations show the number of available candidates after cooldown and uploaded-amount filtering. You then choose how many points to donate to each user and the maximum total budget for that manual run.
 
 ## Quick start
 
@@ -86,7 +100,7 @@ The production configuration file should stay outside git:
 /etc/mam-bonus-manager/config.env
 ```
 
-Start from the example file:
+For local testing, start from the example file:
 
 ```bash
 cp config/config.env.example config.env
@@ -102,7 +116,7 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | `MAM_ID_FILE` | empty | Optional file containing the `mam_id` value. Useful for secret management. |
 | `WORKDIR` | `/opt/MAM` | Runtime directory for cookies, lock file, state files and purchase logs. |
 
-### Logging and runtime settings
+### Runtime settings
 
 | Variable | Default | Description |
 | --- | ---: | --- |
@@ -112,7 +126,7 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | `CURL_RETRIES` | `3` | Number of curl retries. |
 | `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.4` | User-Agent sent to MAM. |
 
-### Global reserve settings
+### Global reserve
 
 | Variable | Default | Description |
 | --- | ---: | --- |
@@ -130,13 +144,6 @@ VIP is evaluated before the reserve is applied to the other automated spending s
 
 Automatic VIP is available only for eligible account classes reported by MAM. The script currently treats `Power User` and `VIP` as eligible.
 
-### Wedge settings
-
-| Variable | Default | Description |
-| --- | ---: | --- |
-| `WEDGE_HOURS` | `4` | Buy one wedge every N hours. Set to `0` to disable automatic wedges. |
-| `WEDGE_COST` | `50000` | Wedge cost in bonus points. |
-
 ### Upload credit settings
 
 | Variable | Default | Description |
@@ -146,6 +153,13 @@ Automatic VIP is available only for eligible account classes reported by MAM. Th
 | `UPLOAD_RATIO_THRESHOLD` | `2.5` | Buy upload credit only if current ratio is below this value. Set to `0` to disable. |
 
 Automated upload purchases require enough points above `BONUS_RESERVE_POINTS` and, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`.
+
+### Wedge settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
+| `WEDGE_HOURS` | `0` | Buy one wedge every N hours. Default is disabled. Set a value greater than `0` to enable automatic wedges. |
+| `WEDGE_COST` | `50000` | Wedge cost in bonus points. |
 
 ### Donation settings
 
@@ -157,15 +171,20 @@ Automated upload purchases require enough points above `BONUS_RESERVE_POINTS` an
 | `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
+| `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
+
+### Donation discovery settings
+
+| Variable | Default | Description |
+| --- | ---: | --- |
 | `DONATION_DISCOVERY_MODE` | `uid_scan` | Candidate discovery mode. `uid_scan` scans user IDs backward; `page` tries the new-users page parser. |
 | `DONATION_SCAN_START_UID` | `279022` | Fallback starting UID for the first scan when no donation history exists yet. |
 | `DONATION_SCAN_START_OFFSET` | `5` | Offset added to the highest UID found in `DONATION_STATE_FILE` to calculate the next scan start. |
 | `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of UIDs to check while scanning backward. |
 | `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by the scan. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
-| `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
 
-Donation discovery can run in uid_scan mode or page mode. The default uid_scan mode scans user IDs backward from a calculated start UID, filters out users already in the local donation history within the cooldown period, optionally filters by uploaded amount, enforces the cumulative per-user limit, and sends donations only while enough points remain above `BONUS_RESERVE_POINTS`.
+The default `uid_scan` mode scans backward from a calculated UID, applies cooldown history, recipient uploaded-amount filtering, the cumulative per-user donation limit, and only spends points above `BONUS_RESERVE_POINTS`.
 
 ### Notification settings
 
@@ -193,7 +212,7 @@ Donation discovery can run in uid_scan mode or page mode. The default uid_scan m
 ./mam-bonus-manager.sh --dry-run
 ```
 
-Use `--dry-run` first after every config change.
+Always use `--dry-run` first after every configuration change.
 
 ### Manual interactive mode
 
@@ -204,11 +223,11 @@ Use `--dry-run` first after every config change.
 
 Manual mode asks step by step. You can skip each step by entering `0` or pressing Enter where supported.
 
-Manual mode currently includes:
+Manual mode includes:
 
 - VIP duration selection: `0`, `4`, `8`, `12`, or `max`.
-- Number of wedges to buy.
 - Upload package and quantity selection.
+- Number of wedges to buy.
 - Donation amount per user and maximum total donation budget.
 
 ### Session and balance checks
@@ -232,16 +251,16 @@ A dedicated donation planner is available for testing the donation candidate flo
 MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
 ```
 
-The planner:
+The planner is always dry-run. It:
 
 1. validates or recreates the MAM session;
 2. reads the current point balance;
 3. keeps `BONUS_RESERVE_POINTS` untouched;
-4. reads new-user candidates;
-5. applies the local cooldown history;
+4. discovers donation candidates;
+5. applies cooldown history and recipient filters;
 6. prints the donations it would make.
 
-The planner is intentionally dry-run only. Use the main script without `--dry-run` when you want to send real donations.
+Use the main script without `--dry-run` only when you want to send real purchases or donations.
 
 ## Local dry-run workflow
 
@@ -258,6 +277,7 @@ Edit `./config.env`:
 ```bash
 MAM_ID="your_real_mam_id"
 WORKDIR="$PWD/.mam-workdir"
+BONUS_RESERVE_POINTS=55000
 VIP=0
 WEDGE_HOURS=0
 DONATIONS=1
