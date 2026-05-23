@@ -221,6 +221,7 @@ json_get_with_mamid() {
 }
 
 # shellcheck source=lib/donations.sh
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/donations.sh"
 
 refresh_user_summary() {
