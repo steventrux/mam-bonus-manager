@@ -39,6 +39,54 @@ donation_recently_sent() {
   return 1
 }
 
+get_total_donated_to_user() {
+  local uid="$1"
+  local username="$2"
+  local ts date_field uid_field username_field amount_field total=0
+
+  [[ -s "$DONATION_STATE_FILE" ]] || { printf '0\n'; return 0; }
+
+  while IFS=$'\t' read -r ts date_field uid_field username_field amount_field; do
+    [[ "$amount_field" =~ ^[0-9]+$ ]] || continue
+    if [[ "$uid_field" == "$uid" || "$username_field" == "$username" ]]; then
+      total=$((total + amount_field))
+    fi
+  done < "$DONATION_STATE_FILE"
+
+  printf '%s\n' "$total"
+}
+
+donation_user_limit_allowed() {
+  local uid="$1"
+  local username="$2"
+  local amount="$3"
+  local max_per_user already_donated remaining
+
+  max_per_user="${DONATION_MAX_POINTS_PER_USER:-1000}"
+  valid_integer "$max_per_user" || fatal "DONATION_MAX_POINTS_PER_USER must be numeric: $max_per_user"
+
+  if [[ "$max_per_user" -le 0 ]]; then
+    return 0
+  fi
+
+  already_donated="$(get_total_donated_to_user "$uid" "$username")"
+  remaining=$((max_per_user - already_donated))
+
+  if [[ "$remaining" -le 0 ]]; then
+    log "Donation skipped for ${username} (uid=${uid}): user limit reached (${already_donated}/${max_per_user})."
+    return 1
+  fi
+
+  if [[ "$amount" -gt "$remaining" ]]; then
+    log "Donation skipped for ${username} (uid=${uid}): amount ${amount} would exceed user limit (${already_donated}/${max_per_user}, remaining ${remaining})."
+    return 1
+  fi
+
+  debug "Donation user limit OK for ${username} (uid=${uid}): already=${already_donated}, amount=${amount}, max=${max_per_user}."
+  return 0
+}
+
+
 get_new_users() {
   local response
   response="$(json_get "${BASE_URL}/newUsers.php")" || return 1
@@ -155,6 +203,10 @@ plan_donation() {
   fi
 
   if ! donation_recipient_upload_allowed "$uid" "$username"; then
+    return 1
+  fi
+
+  if ! donation_user_limit_allowed "$uid" "$username" "$amount"; then
     return 1
   fi
 
