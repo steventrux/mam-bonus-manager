@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 VERSION="1.3.1"
+VIP_BLOCK_COST=5000
+WEDGE_COST=50000
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=0
 COMMAND="run"
@@ -161,10 +163,8 @@ load_config() {
   WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
   BONUS_RESERVE_POINTS="${MAM_BONUS_RESERVE_POINTS:-${BONUS_RESERVE_POINTS:-55000}}"
   VIP="${MAM_VIP:-${VIP:-1}}"
-  VIP_BLOCK_COST="${MAM_VIP_BLOCK_COST:-${VIP_BLOCK_COST:-${MAM_VIP_WEEK_COST:-${VIP_WEEK_COST:-5000}}}}"
   VIP_THRESHOLD_WEEKS="${MAM_VIP_THRESHOLD_WEEKS:-${MAM_VIP_THRESHOLD:-${VIP_THRESHOLD_WEEKS:-11}}}"
   WEDGE_HOURS="${MAM_WEDGE_HOURS:-${MAM_WEDGEHOURS:-${WEDGE_HOURS:-0}}}"
-  WEDGE_COST="${MAM_WEDGE_COST:-${WEDGE_COST:-50000}}"
   CURL_TIMEOUT="${MAM_CURL_TIMEOUT:-${CURL_TIMEOUT:-30}}"
   CURL_RETRIES="${MAM_CURL_RETRIES:-${CURL_RETRIES:-3}}"
   USER_AGENT="${MAM_USER_AGENT:-${USER_AGENT:-Mozilla/5.0 mam-bonus-manager/${VERSION}}}"
@@ -277,7 +277,7 @@ config_migrate() {
   # Comment obsolete keys so they cannot interfere with newer config logic.
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      BUFFER=*|DONATION_BUFFER=*|WEDGE_RESERVE_AFTER=*)
+      BUFFER=*|DONATION_BUFFER=*|WEDGE_RESERVE_AFTER=*|VIP_BLOCK_COST=*|WEDGE_COST=*)
         if [[ "$obsolete_found" -eq 0 ]]; then
           printf '%s\n' '# Obsolete settings commented by mam-bonus-manager config migration.' >> "$tmp_file"
           obsolete_found=1
@@ -291,6 +291,12 @@ config_migrate() {
             ;;
           WEDGE_RESERVE_AFTER=*)
             printf '%s\n' '# OBSOLETE since v1.3.x: wedges use BONUS_RESERVE_POINTS.' >> "$tmp_file"
+            ;;
+          VIP_BLOCK_COST=*)
+            printf '%s\n' '# OBSOLETE: VIP block cost is fixed by MAM and is not user-configurable.' >> "$tmp_file"
+            ;;
+          WEDGE_COST=*)
+            printf '%s\n' '# OBSOLETE: wedge cost is fixed by MAM and is not user-configurable.' >> "$tmp_file"
             ;;
         esac
         printf '# %s\n' "$line" >> "$tmp_file"
@@ -683,7 +689,6 @@ buy_upload_until_buffer() {
 
 manual_vip_step() {
   local points="$1" option cost now result success error_message before refreshed_points actual_cost current_class max_suffix=""
-  valid_integer "$VIP_BLOCK_COST" || fatal "VIP_BLOCK_COST must be numeric: $VIP_BLOCK_COST"
 
   refresh_user_summary || {
     warn "Could not refresh user summary before VIP step; skipping VIP purchase."
@@ -747,7 +752,6 @@ manual_vip_step() {
 
 manual_wedge_step() {
   local points="$1" spendable max_wedges count i now result success error_message estimated_cost
-  valid_integer "$WEDGE_COST" || fatal "WEDGE_COST must be numeric: $WEDGE_COST"
 
   log "Manual step 2/4 - Wedges"
   spendable="$points"

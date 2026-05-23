@@ -124,7 +124,7 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | `LOG_FILE` | empty | Optional additional log file path. |
 | `CURL_TIMEOUT` | `30` | Maximum curl request time in seconds. |
 | `CURL_RETRIES` | `3` | Number of curl retries. |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.2.4` | User-Agent sent to MAM. |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.3.1` | User-Agent sent to MAM. |
 
 ### Global reserve
 
@@ -139,10 +139,9 @@ VIP is evaluated before the reserve is applied to the other automated spending s
 | Variable | Default | Description |
 | --- | ---: | --- |
 | `VIP` | `1` | Set to `1` to enable automatic VIP purchase or extension. Set to `0` to disable the VIP step. |
-| `VIP_BLOCK_COST` | `5000` | Cost of one 4-week VIP block. |
 | `VIP_THRESHOLD_WEEKS` | `11` | If already VIP, automatic extension runs only when VIP expires within this many weeks. |
 
-Automatic VIP is available only for eligible account classes reported by MAM. The script currently treats `Power User` and `VIP` as eligible.
+Automatic VIP is available only for eligible account classes reported by MAM. The script currently treats `Power User` and `VIP` as eligible. The VIP block cost is fixed by MAM and is not exposed as a user-configurable setting.
 
 ### Upload credit settings
 
@@ -159,7 +158,8 @@ Automated upload purchases require enough points above `BONUS_RESERVE_POINTS` an
 | Variable | Default | Description |
 | --- | ---: | --- |
 | `WEDGE_HOURS` | `0` | Buy one wedge every N hours. Default is disabled. Set a value greater than `0` to enable automatic wedges. |
-| `WEDGE_COST` | `50000` | Wedge cost in bonus points. |
+
+The wedge cost is fixed by MAM and is not exposed as a user-configurable setting.
 
 ### Donation settings
 
