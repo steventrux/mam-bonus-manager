@@ -49,6 +49,7 @@ Commands:
   interactive     Alias of manual.
   check-session   Validate or recreate the MAM session only.
   points          Show the current seedbonus balance only.
+  config          Create or migrate the configuration file from config.env.example.
   help            Show this help message.
 
 Options:
@@ -65,7 +66,7 @@ parse_args() {
       --dry-run) DRY_RUN=1; shift ;;
       --version) echo "$VERSION"; exit 0 ;;
       -h|--help|help) COMMAND="help"; shift ;;
-      run|manual|interactive|check-session|points) COMMAND="$1"; shift ;;
+      run|manual|interactive|check-session|points|config) COMMAND="$1"; shift ;;
       *) fatal "Unknown argument: $1" ;;
     esac
   done
@@ -202,10 +203,109 @@ load_config() {
 
 check_dependencies() {
   local missing=()
-  for bin in curl jq date find flock grep sed awk; do
+  for bin in curl jq date find flock grep sed awk mktemp; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
+}
+
+config_migrate() {
+  local example_file target_file target_dir backup_file added_file obsolete_found=0
+  local key value line existing_keys tmp_file
+
+  example_file="${SCRIPT_DIR}/config/config.env.example"
+  target_file="${CONFIG_FILE}"
+  target_dir="$(dirname "$target_file")"
+
+  [[ -r "$example_file" ]] || fatal "Example config not found or not readable: $example_file"
+
+  mkdir -p "$target_dir"
+
+  if [[ ! -e "$target_file" ]]; then
+    cp "$example_file" "$target_file"
+    chmod 600 "$target_file" 2>/dev/null || true
+    log "Configuration file created: $target_file"
+    log "Edit it and set MAM_ID or MAM_ID_FILE before running the script."
+    return 0
+  fi
+
+  [[ -r "$target_file" ]] || fatal "Configuration file is not readable: $target_file"
+
+  backup_file="${target_file}.bak.$(date +%Y%m%d_%H%M%S)"
+  cp "$target_file" "$backup_file"
+  chmod 600 "$backup_file" 2>/dev/null || true
+  log "Backup created: $backup_file"
+
+  tmp_file="$(mktemp)"
+  added_file="$(mktemp)"
+
+  # Comment obsolete keys so they cannot interfere with newer config logic.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      BUFFER=*|DONATION_BUFFER=*|WEDGE_RESERVE_AFTER=*)
+        if [[ "$obsolete_found" -eq 0 ]]; then
+          printf '%s\n' '# Obsolete settings commented by mam-bonus-manager config migration.' >> "$tmp_file"
+          obsolete_found=1
+        fi
+        case "$line" in
+          BUFFER=*)
+            printf '%s\n' '# OBSOLETE since v1.3.x: replaced by BONUS_RESERVE_POINTS.' >> "$tmp_file"
+            ;;
+          DONATION_BUFFER=*)
+            printf '%s\n' '# OBSOLETE since v1.3.x: donations use BONUS_RESERVE_POINTS.' >> "$tmp_file"
+            ;;
+          WEDGE_RESERVE_AFTER=*)
+            printf '%s\n' '# OBSOLETE since v1.3.x: wedges use BONUS_RESERVE_POINTS.' >> "$tmp_file"
+            ;;
+        esac
+        printf '# %s\n' "$line" >> "$tmp_file"
+        ;;
+      *)
+        printf '%s\n' "$line" >> "$tmp_file"
+        ;;
+    esac
+  done < "$target_file"
+
+  existing_keys="$(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$tmp_file" | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/' | sort -u)"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+
+    if ! grep -qx "$key" <<< "$existing_keys"; then
+      printf '%s=%s\n' "$key" "$value" >> "$added_file"
+      existing_keys="${existing_keys}"$'\n'"${key}"
+    fi
+  done < "$example_file"
+
+  if [[ -s "$added_file" ]]; then
+    {
+      printf '\n'
+      printf '%s\n' '# Added by mam-bonus-manager config migration.'
+      cat "$added_file"
+    } >> "$tmp_file"
+  fi
+
+  cat "$tmp_file" > "$target_file"
+  chmod 600 "$target_file" 2>/dev/null || true
+
+  if [[ -s "$added_file" ]]; then
+    log "Configuration migrated: $target_file"
+    log "Added missing setting(s):"
+    sed 's/^/ - /' "$added_file" >&2
+  else
+    log "Configuration already contains all current settings."
+  fi
+
+  if [[ "$obsolete_found" -eq 1 ]]; then
+    warn "Obsolete setting(s) were commented out. Review $target_file before the next real run."
+  fi
+
+  rm -f "$tmp_file" "$added_file"
 }
 
 json_get() {
@@ -723,6 +823,12 @@ run_manual_mode() {
 
 run_main() {
   check_dependencies
+
+  if [[ "$COMMAND" == "config" ]]; then
+    config_migrate
+    return 0
+  fi
+
   load_config
 
   exec 9>"$LOCK_FILE"

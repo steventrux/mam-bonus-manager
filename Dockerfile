@@ -13,6 +13,7 @@ WORKDIR /app
 
 COPY mam-bonus-manager.sh /usr/local/bin/mam-bonus-manager
 COPY lib /usr/local/bin/lib
+COPY config /usr/local/bin/config
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/mam-bonus-manager \
