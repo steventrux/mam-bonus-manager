@@ -7,7 +7,8 @@ RUN apk add --no-cache \
     util-linux \
     findutils \
     coreutils \
-    tzdata
+    tzdata \
+    nano
 
 WORKDIR /app
 
