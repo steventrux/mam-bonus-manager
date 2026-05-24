@@ -46,11 +46,11 @@ Automated mode runs the steps in this order:
 
 VIP is evaluated first. Automatic VIP purchases are attempted only when `VIP=1` and the current account class is eligible.
 
-Upload credit is controlled by point availability, `BONUS_RESERVE_POINTS` and the ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard.
+Upload credit is controlled by point availability and the ratio threshold. With the default `UPLOAD_RATIO_THRESHOLD=2.5`, upload credit is bought only when the current ratio is below `2.5`. Set `UPLOAD_RATIO_THRESHOLD=0` to disable the ratio guard. Larger upload packages respect `BONUS_RESERVE_POINTS`; the minimum configured upload package can be bought as an emergency package when enough points are available for that package.
 
 Wedges are disabled by default. Set `WEDGE_HOURS` to a value greater than `0` to enable automatic wedge purchases. The automated wedge step also respects `BONUS_RESERVE_POINTS`.
 
-Donations run last and use only points above `BONUS_RESERVE_POINTS`. They also apply cooldown history, max candidates per run, recipient uploaded-amount filtering and the cumulative per-user donation limit.
+Donations run last and use only points above `BONUS_RESERVE_POINTS`. They are also skipped when the current ratio is below `UPLOAD_RATIO_THRESHOLD`, so points can accumulate for upload credit instead of being donated while the ratio is low. Donations also apply cooldown history, max candidates per run, recipient uploaded-amount filtering and the cumulative per-user donation limit.
 
 With `--dry-run`, purchases and donations are only printed. Without `--dry-run`, enabled spending actions are sent to MAM and successful actions are recorded in the local TSV history files.
 
@@ -124,15 +124,15 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | `LOG_FILE` | empty | Optional additional log file path. |
 | `CURL_TIMEOUT` | `30` | Maximum curl request time in seconds. |
 | `CURL_RETRIES` | `3` | Number of curl retries. |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.3.1` | User-Agent sent to MAM. |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager` | User-Agent sent to MAM. |
 
 ### Global reserve
 
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `BONUS_RESERVE_POINTS` | `55000` | Global reserve used by automated upload credit, wedge and donation steps. The default 55k reserve is intended to preserve enough points for the maximum VIP purchase shown by MAM, but it can be lowered or raised according to each user's preferences. |
+| `BONUS_RESERVE_POINTS` | `30000` | Safety reserve preserved by automated wedge, donation and larger upload-credit purchases. It does not block automatic VIP purchases, and it does not block the minimum configured upload package when the ratio guard allows upload purchases and enough points are available for that package. |
 
-VIP is evaluated before the reserve is applied to the other automated spending steps. Manual mode does not enforce this reserve, because the user confirms each action step by step.
+VIP is evaluated before the reserve is applied to the other automated spending steps and does not enforce this reserve locally. The reserve is mainly used to avoid spending strategic points on non-essential purchases while still allowing emergency upload-credit recovery. Manual mode does not enforce this reserve, because the user confirms each action step by step.
 
 ### VIP settings
 
@@ -151,7 +151,7 @@ Automatic VIP is available only for eligible account classes reported by MAM. Th
 | `UPLOAD_PACKS` | `100 50` | Upload credit package sizes to try, from largest to smallest, in GB. |
 | `UPLOAD_RATIO_THRESHOLD` | `2.5` | Buy upload credit only if current ratio is below this value. Set to `0` to disable. |
 
-Automated upload purchases require enough points above `BONUS_RESERVE_POINTS` and, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`.
+Automated upload purchases require, unless disabled, a current ratio below `UPLOAD_RATIO_THRESHOLD`. Larger packages require enough points above `BONUS_RESERVE_POINTS`; the minimum configured package requires only enough points to pay for that package.
 
 ### Wedge settings
 
@@ -293,8 +293,11 @@ At minimum, check these values in `./config.env`:
 ```bash
 MAM_ID="your_real_mam_id"
 WORKDIR="$PWD/.mam-workdir"
-BONUS_RESERVE_POINTS=55000
+BONUS_RESERVE_POINTS=30000
 VIP=1
+MIN_UPLOAD_GB=50
+UPLOAD_PACKS="100 50"
+UPLOAD_RATIO_THRESHOLD=2.5
 WEDGE_HOURS=0
 DONATIONS=1
 ```
