@@ -365,32 +365,17 @@ sudo systemctl start mam-bonus-manager.service
 journalctl -u mam-bonus-manager.service -n 100 --no-pager
 ```
 
-## Runtime files
-
-Typical runtime files are stored under `WORKDIR`:
-
-```text
-MAM.cookies
-MAM.json
-mam-bonus-manager.lock
-wedge.last
-purchases.tsv
-donations.tsv
-telegram-summary.sent
-```
-
-These files may contain sensitive data or account activity history. Do not commit them.
-
 ## Safety notes
 
-Never commit:
+Keep secrets and runtime files out of git. Never commit or share:
 
 - the real `MAM_ID` value;
-- Telegram bot tokens or chat IDs;
-- `MAM.cookies`;
 - the real `config.env` file;
-- runtime state files;
+- `MAM.cookies`;
+- Telegram bot tokens or chat IDs;
 - logs containing sensitive API responses.
+
+The `WORKDIR` directory contains cookies, state files and activity history, so treat it as private.
 
 Recommended workflow:
 
@@ -399,15 +384,4 @@ Recommended workflow:
 ./mam-bonus-manager.sh --dry-run manual
 ```
 
-Only run without `--dry-run` after reviewing the output. When `DONATIONS=1`, running without `--dry-run` can send real donations to new users.
-
-## Project layout
-
-```text
-mam-bonus-manager.sh              Main script
-config/config.env.example         Example configuration
-lib/donations.sh                  Donation helper functions
-scripts/donation-planner.sh       Standalone donation dry-run planner
-systemd/                          systemd service and timer files
-compose.yml                       Docker Compose example
-```
+Run without `--dry-run` only after reviewing the output. When `DONATIONS=1`, running without `--dry-run` can send real donations to new users.
