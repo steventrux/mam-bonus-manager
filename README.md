@@ -177,14 +177,15 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `DONATION_DISCOVERY_MODE` | `uid_scan` | Candidate discovery mode. `uid_scan` scans user IDs backward; `page` tries the new-users page parser. |
+| `DONATION_DISCOVERY_MODE` | `uid_latest` | Candidate discovery mode. `uid_latest` automatically finds the latest valid UID, then scans backward for recent donation candidates. |
 | `DONATION_SCAN_START_UID` | `279022` | Fallback starting UID for the first scan when no donation history exists yet. |
-| `DONATION_SCAN_START_OFFSET` | `5` | Offset added to the highest UID found in `DONATION_STATE_FILE` to calculate the next scan start. |
+| `DONATION_SCAN_START_OFFSET` | `5` | Offset added to the highest UID found in `DONATION_STATE_FILE` to calculate the next discovery start. |
+| `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used by `uid_latest` to find a valid/empty interval before binary search. |
 | `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of UIDs to check while scanning backward. |
 | `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by the scan. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-The default `uid_scan` mode scans backward from a calculated UID, applies cooldown history, recipient uploaded-amount filtering, the cumulative per-user donation limit, and only spends points above `BONUS_RESERVE_POINTS`.
+The `uid_latest` discovery mode automatically finds the latest valid UID using block probing and binary search, then scans backward from that UID. Donation candidates still go through cooldown history, recipient uploaded-amount filtering, the cumulative per-user donation limit, and only spend points above `BONUS_RESERVE_POINTS`.
 
 ### Notification settings
 
