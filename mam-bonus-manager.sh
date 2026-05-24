@@ -636,7 +636,7 @@ buy_wedge_if_needed() {
 }
 
 buy_upload_until_buffer() {
-  local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio
+  local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio purchased_any=0
   valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
   valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
 
@@ -667,14 +667,27 @@ buy_upload_until_buffer() {
     fi
 
     pack_cost=$((pack * 500))
-    required=$((pack_cost + BONUS_RESERVE_POINTS))
-    log "Checking ${pack}GB upload package. Purchase threshold: > ${required} points."
 
-    while [[ "$points" -gt "$required" ]]; do
-      log "${points} > ${required}: buying ${pack}GB of upload credit."
+    if [[ "$pack" -eq "$MIN_UPLOAD_GB" ]]; then
+      if [[ "$purchased_any" -gt 0 ]]; then
+        log "Skipping emergency minimum ${pack}GB upload package because upload credit was already purchased in this run."
+        continue
+      fi
+
+      required="$pack_cost"
+      log "Checking emergency minimum ${pack}GB upload package. Purchase threshold: >= ${required} points."
+
+      if [[ "$points" -lt "$required" ]]; then
+        log "Not enough points for emergency minimum ${pack}GB upload package: ${points}. Required minimum: ${required}."
+        continue
+      fi
+
+      log "${points} >= ${required}: buying one emergency minimum ${pack}GB upload credit package."
+
       if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN: would buy ${pack}GB. Estimated decrease: ${pack_cost} points."
         points=$((points - pack_cost))
+        purchased_any=$((purchased_any + 1))
         continue
       fi
 
@@ -687,6 +700,39 @@ buy_upload_until_buffer() {
 
       if [[ "$new_points" -lt "$points" ]]; then
         points="$new_points"
+        purchased_any=$((purchased_any + 1))
+        record_purchase upload "$pack" "$pack_cost"
+        log "Purchase completed. Remaining points reported by API: ${points}."
+      else
+        fatal "Points did not decrease after the purchase. Before=${points}, After=${new_points}."
+      fi
+
+      continue
+    fi
+
+    required=$((pack_cost + BONUS_RESERVE_POINTS))
+    log "Checking ${pack}GB upload package. Purchase threshold: > ${required} points."
+
+    while [[ "$points" -gt "$required" ]]; do
+      log "${points} > ${required}: buying ${pack}GB of upload credit."
+
+      if [[ "$DRY_RUN" -eq 1 ]]; then
+        log "DRY-RUN: would buy ${pack}GB. Estimated decrease: ${pack_cost} points."
+        points=$((points - pack_cost))
+        purchased_any=$((purchased_any + 1))
+        continue
+      fi
+
+      now="$(date +%s%3N)"
+      response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${pack}&_=${now}")" || fatal "Upload purchase failed for ${pack}GB: curl/API error."
+      error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+      new_points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
+      valid_number "$new_points" || fatal "Upload purchase could not be verified for ${pack}GB. API error: ${error_message:-none}. Response: $response"
+      new_points="$(int_part "$new_points")"
+
+      if [[ "$new_points" -lt "$points" ]]; then
+        points="$new_points"
+        purchased_any=$((purchased_any + 1))
         record_purchase upload "$pack" "$pack_cost"
         log "Purchase completed. Remaining points reported by API: ${points}."
       else
