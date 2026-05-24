@@ -124,15 +124,15 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | `LOG_FILE` | empty | Optional additional log file path. |
 | `CURL_TIMEOUT` | `30` | Maximum curl request time in seconds. |
 | `CURL_RETRIES` | `3` | Number of curl retries. |
-| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager/1.3.1` | User-Agent sent to MAM. |
+| `USER_AGENT` | `Mozilla/5.0 mam-bonus-manager` | User-Agent sent to MAM. |
 
 ### Global reserve
 
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `BONUS_RESERVE_POINTS` | `55000` | Global reserve used by automated wedge, donation and larger upload-credit steps. The minimum configured upload package can still be bought when the ratio guard allows upload purchases and enough points are available for that package. |
+| `BONUS_RESERVE_POINTS` | `30000` | Safety reserve preserved by automated wedge, donation and larger upload-credit purchases. It does not block automatic VIP purchases, and it does not block the minimum configured upload package when the ratio guard allows upload purchases and enough points are available for that package. |
 
-VIP is evaluated before the reserve is applied to the other automated spending steps and does not enforce this reserve locally. Manual mode does not enforce this reserve, because the user confirms each action step by step.
+VIP is evaluated before the reserve is applied to the other automated spending steps and does not enforce this reserve locally. The reserve is mainly used to avoid spending strategic points on non-essential purchases while still allowing emergency upload-credit recovery. Manual mode does not enforce this reserve, because the user confirms each action step by step.
 
 ### VIP settings
 
