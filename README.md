@@ -175,14 +175,18 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 
 ### Donation discovery settings
 
+Donation candidate discovery is automatic and does not require a manually configured starting UID.
+
+The script starts from the authenticated account UID, probes upward in configurable blocks until it finds an empty UID, uses binary search to identify the latest valid UID, and then scans backward from there to collect recent donation candidates.
+
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used by `uid_latest` to find a valid/empty interval before binary search. |
-| `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of UIDs to check while scanning backward. |
-| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by the scan. |
+| `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used to find a valid/empty interval before binary search. |
+| `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of recent UIDs to check while scanning backward from the latest valid UID. |
+| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by discovery before donation filters are applied. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-Donation discovery automatically starts from the authenticated user UID, finds the latest valid UID using block probing and binary search, then scans backward from that UID. Donation candidates still go through cooldown history, recipient uploaded-amount filtering, the cumulative per-user donation limit, and only spend points above `BONUS_RESERVE_POINTS`.
+Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve.
 
 ### Notification settings
 
