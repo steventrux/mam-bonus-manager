@@ -203,7 +203,7 @@ get_new_users_by_latest_uid() {
       username="$(jq -r '.username // empty' <<< "$response" 2>/dev/null || true)"
 
       if [[ "$profile_uid" =~ ^[0-9]+$ && -n "$username" && "$username" != "null" ]]; then
-        printf '%s\t%s\n' "$profile_uid" "$username"
+        printf '%s\t%s\n' "$profile_uid" "$username" 2>/dev/null || return 0
         found=$((found + 1))
       fi
     fi
@@ -304,7 +304,7 @@ get_donation_candidates() {
     if ! donation_recipient_upload_allowed "$uid" "$username"; then
       continue
     fi
-    printf '%s\t%s\n' "$uid" "$username"
+    printf '%s\t%s\n' "$uid" "$username" 2>/dev/null || return 0
   done < <(get_new_users)
 }
 
@@ -439,18 +439,10 @@ donate_to_new_users_if_enabled() {
 
 manual_donation_step() {
   local points="$1"
-  local candidate_count amount max_budget max_affordable max_total planned=0 spendable uid username before after
+  local amount max_budget max_affordable max_total planned=0 spendable uid username before after
+  local candidates=() candidate candidate_count
 
   log "Manual step 4/4 - Donations to new users"
-
-  candidate_count="$(count_donation_candidates)"
-  log "New-user donation candidates after cooldown and upload filters: ${candidate_count}."
-
-  if [[ "$candidate_count" -eq 0 ]]; then
-    log "No donation candidates available."
-    printf '%s\n' "$points"
-    return 0
-  fi
 
   amount="$(ask_integer "Bonus points to donate to each new user? [0 to skip]: " "$points")"
   [[ "$amount" -eq 0 ]] && { log "Donations skipped."; printf '%s\n' "$points"; return 0; }
@@ -468,9 +460,22 @@ manual_donation_step() {
   fi
 
   log "Manual donations selected: ${amount} point(s) per user, maximum total ${max_total}."
+  log "Discovering donation candidates."
+
+  mapfile -t candidates < <(get_donation_candidates)
+  candidate_count="${#candidates[@]}"
+  log "New-user donation candidates after cooldown and upload filters: ${candidate_count}."
+
+  if [[ "$candidate_count" -eq 0 ]]; then
+    log "No donation candidates available."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
   spendable="$max_total"
 
-  while IFS=$'\t' read -r uid username; do
+  for candidate in "${candidates[@]}"; do
+    IFS=$'\t' read -r uid username <<< "$candidate"
     [[ -n "$uid" && -n "$username" ]] || continue
     [[ "$spendable" -ge "$amount" ]] || break
 
@@ -485,14 +490,11 @@ manual_donation_step() {
         fi
         after="$points"
         spendable=$((spendable - (before - after)))
-        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
-          spendable=$((spendable - amount))
-        fi
         [[ "$spendable" -lt 0 ]] && spendable=0
         debug "Manual donation balance update: before=${before}, after=${after}, remaining budget=${spendable}."
       fi
     fi
-  done < <(get_donation_candidates)
+  done
 
   log "Manual donation step completed. Donations sent/planned: ${planned}. Estimated/current points: ${points}."
   printf '%s\n' "$points"
