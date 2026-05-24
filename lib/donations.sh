@@ -103,21 +103,9 @@ get_max_donated_uid() {
 }
 
 get_donation_discovery_start_uid() {
-  local max_donated_uid start_uid
-
-  valid_integer "$DONATION_SCAN_START_UID" || fatal "DONATION_SCAN_START_UID must be numeric: $DONATION_SCAN_START_UID"
-  valid_integer "$DONATION_SCAN_START_OFFSET" || fatal "DONATION_SCAN_START_OFFSET must be numeric: $DONATION_SCAN_START_OFFSET"
-
-  max_donated_uid="$(get_max_donated_uid)"
-  if [[ "$max_donated_uid" -gt 0 ]]; then
-    start_uid=$((max_donated_uid + DONATION_SCAN_START_OFFSET))
-  else
-    start_uid="$DONATION_SCAN_START_UID"
-  fi
-
-  printf '%s\n' "$start_uid"
+  [[ "${MAM_UID:-}" =~ ^[0-9]+$ ]] || fatal "MAM_UID is missing or invalid before donation discovery."
+  printf '%s\n' "$MAM_UID"
 }
-
 
 uid_profile_is_valid() {
   local uid="$1"
@@ -230,12 +218,7 @@ get_new_users_by_latest_uid() {
 }
 
 get_new_users() {
-  case "${DONATION_DISCOVERY_MODE:-uid_latest}" in
-    uid_latest) get_new_users_by_latest_uid ;;
-    *)
-      fatal "Unsupported DONATION_DISCOVERY_MODE: ${DONATION_DISCOVERY_MODE}. Supported: uid_latest"
-      ;;
-  esac
+  get_new_users_by_latest_uid
 }
 
 human_size_to_bytes() {
