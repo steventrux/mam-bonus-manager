@@ -178,9 +178,7 @@ load_config() {
   DONATION_MAX_POINTS_PER_USER="${MAM_DONATION_MAX_POINTS_PER_USER:-${DONATION_MAX_POINTS_PER_USER:-1000}}"
   DONATION_COOLDOWN_DAYS="${MAM_DONATION_COOLDOWN_DAYS:-${DONATION_COOLDOWN_DAYS:-30}}"
   DONATION_MAX_RECIPIENT_UPLOADED_BYTES="${MAM_DONATION_MAX_RECIPIENT_UPLOADED_BYTES:-${DONATION_MAX_RECIPIENT_UPLOADED_BYTES:-53687091200}}"
-  DONATION_DISCOVERY_MODE="${MAM_DONATION_DISCOVERY_MODE:-${DONATION_DISCOVERY_MODE:-uid_scan}}"
-  DONATION_SCAN_START_UID="${MAM_DONATION_SCAN_START_UID:-${DONATION_SCAN_START_UID:-279022}}"
-  DONATION_SCAN_START_OFFSET="${MAM_DONATION_SCAN_START_OFFSET:-${DONATION_SCAN_START_OFFSET:-5}}"
+  DONATION_LATEST_UID_STEP="${MAM_DONATION_LATEST_UID_STEP:-${DONATION_LATEST_UID_STEP:-1000}}"
   DONATION_SCAN_LOOKBACK="${MAM_DONATION_SCAN_LOOKBACK:-${DONATION_SCAN_LOOKBACK:-100}}"
   DONATION_SCAN_MAX_CANDIDATES="${MAM_DONATION_SCAN_MAX_CANDIDATES:-${DONATION_SCAN_MAX_CANDIDATES:-20}}"
   DONATION_SCAN_DELAY_SECONDS="${MAM_DONATION_SCAN_DELAY_SECONDS:-${DONATION_SCAN_DELAY_SECONDS:-1}}"
@@ -274,37 +272,25 @@ config_migrate() {
   tmp_file="$(mktemp)"
   added_file="$(mktemp)"
 
-  # Comment obsolete keys so they cannot interfere with newer config logic.
+  example_keys="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$example_file" | cut -d= -f1 | sort -u)"
+
+  # Comment active KEY=VALUE lines that are no longer present in config.env.example.
+  # The example file is the source of truth for user-configurable settings.
   while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      BUFFER=*|DONATION_BUFFER=*|WEDGE_RESERVE_AFTER=*|VIP_BLOCK_COST=*|WEDGE_COST=*)
+    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      key="${line%%=*}"
+      if ! grep -qx "$key" <<< "$example_keys"; then
         if [[ "$obsolete_found" -eq 0 ]]; then
           printf '%s\n' '# Obsolete settings commented by mam-bonus-manager config migration.' >> "$tmp_file"
           obsolete_found=1
         fi
-        case "$line" in
-          BUFFER=*)
-            printf '%s\n' '# OBSOLETE since v1.3.x: replaced by BONUS_RESERVE_POINTS.' >> "$tmp_file"
-            ;;
-          DONATION_BUFFER=*)
-            printf '%s\n' '# OBSOLETE since v1.3.x: donations use BONUS_RESERVE_POINTS.' >> "$tmp_file"
-            ;;
-          WEDGE_RESERVE_AFTER=*)
-            printf '%s\n' '# OBSOLETE since v1.3.x: wedges use BONUS_RESERVE_POINTS.' >> "$tmp_file"
-            ;;
-          VIP_BLOCK_COST=*)
-            printf '%s\n' '# OBSOLETE: VIP block cost is fixed by MAM and is not user-configurable.' >> "$tmp_file"
-            ;;
-          WEDGE_COST=*)
-            printf '%s\n' '# OBSOLETE: wedge cost is fixed by MAM and is not user-configurable.' >> "$tmp_file"
-            ;;
-        esac
+        printf '# OBSOLETE: no longer present in config/config.env.example.\n' >> "$tmp_file"
         printf '# %s\n' "$line" >> "$tmp_file"
-        ;;
-      *)
-        printf '%s\n' "$line" >> "$tmp_file"
-        ;;
-    esac
+        continue
+      fi
+    fi
+
+    printf '%s\n' "$line" >> "$tmp_file"
   done < "$target_file"
 
   existing_keys="$(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$tmp_file" | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/' | sort -u)"
