@@ -175,16 +175,18 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 
 ### Donation discovery settings
 
+Donation candidate discovery is automatic and does not require a manually configured starting UID.
+
+The script starts from the authenticated account UID, probes upward in configurable blocks until it finds an empty UID, uses binary search to identify the latest valid UID, and then scans backward from there to collect recent donation candidates.
+
 | Variable | Default | Description |
 | --- | ---: | --- |
-| `DONATION_DISCOVERY_MODE` | `uid_scan` | Candidate discovery mode. `uid_scan` scans user IDs backward; `page` tries the new-users page parser. |
-| `DONATION_SCAN_START_UID` | `279022` | Fallback starting UID for the first scan when no donation history exists yet. |
-| `DONATION_SCAN_START_OFFSET` | `5` | Offset added to the highest UID found in `DONATION_STATE_FILE` to calculate the next scan start. |
-| `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of UIDs to check while scanning backward. |
-| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by the scan. |
+| `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used to find a valid/empty interval before binary search. |
+| `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of recent UIDs to check while scanning backward from the latest valid UID. |
+| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by discovery before donation filters are applied. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-The default `uid_scan` mode scans backward from a calculated UID, applies cooldown history, recipient uploaded-amount filtering, the cumulative per-user donation limit, and only spends points above `BONUS_RESERVE_POINTS`.
+Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve.
 
 ### Notification settings
 
@@ -363,32 +365,17 @@ sudo systemctl start mam-bonus-manager.service
 journalctl -u mam-bonus-manager.service -n 100 --no-pager
 ```
 
-## Runtime files
-
-Typical runtime files are stored under `WORKDIR`:
-
-```text
-MAM.cookies
-MAM.json
-mam-bonus-manager.lock
-wedge.last
-purchases.tsv
-donations.tsv
-telegram-summary.sent
-```
-
-These files may contain sensitive data or account activity history. Do not commit them.
-
 ## Safety notes
 
-Never commit:
+Keep secrets and runtime files out of git. Never commit or share:
 
 - the real `MAM_ID` value;
-- Telegram bot tokens or chat IDs;
-- `MAM.cookies`;
 - the real `config.env` file;
-- runtime state files;
+- `MAM.cookies`;
+- Telegram bot tokens or chat IDs;
 - logs containing sensitive API responses.
+
+The `WORKDIR` directory contains cookies, state files and activity history, so treat it as private.
 
 Recommended workflow:
 
@@ -397,15 +384,4 @@ Recommended workflow:
 ./mam-bonus-manager.sh --dry-run manual
 ```
 
-Only run without `--dry-run` after reviewing the output. When `DONATIONS=1`, running without `--dry-run` can send real donations to new users.
-
-## Project layout
-
-```text
-mam-bonus-manager.sh              Main script
-config/config.env.example         Example configuration
-lib/donations.sh                  Donation helper functions
-scripts/donation-planner.sh       Standalone donation dry-run planner
-systemd/                          systemd service and timer files
-compose.yml                       Docker Compose example
-```
+Run without `--dry-run` only after reviewing the output. When `DONATIONS=1`, running without `--dry-run` can send real donations to new users.

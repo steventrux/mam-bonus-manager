@@ -87,17 +87,6 @@ donation_user_limit_allowed() {
 }
 
 
-get_new_users_from_page() {
-  local response
-  response="$(json_get "${BASE_URL}/newUsers.php")" || return 1
-
-  printf '%s\n' "$response" \
-    | tr '\n' ' ' \
-    | grep -oE 'href="/u/[0-9]+"[^>]*>[^<]+' \
-    | sed -E 's/.*href="\/u\/([0-9]+)"[^>]*>([^<]+).*/\1\t\2/' \
-    | awk -F '\t' 'NF >= 2 && !seen[$1]++ { print $1 "\t" $2 }'
-}
-
 get_max_donated_uid() {
   local ts date_field uid_field username_field amount_field max_uid=0
 
@@ -113,26 +102,88 @@ get_max_donated_uid() {
   printf '%s\n' "$max_uid"
 }
 
-get_uid_scan_start() {
-  local max_donated_uid start_uid
-
-  valid_integer "$DONATION_SCAN_START_UID" || fatal "DONATION_SCAN_START_UID must be numeric: $DONATION_SCAN_START_UID"
-  valid_integer "$DONATION_SCAN_START_OFFSET" || fatal "DONATION_SCAN_START_OFFSET must be numeric: $DONATION_SCAN_START_OFFSET"
-
-  max_donated_uid="$(get_max_donated_uid)"
-  if [[ "$max_donated_uid" -gt 0 ]]; then
-    start_uid=$((max_donated_uid + DONATION_SCAN_START_OFFSET))
-  else
-    start_uid="$DONATION_SCAN_START_UID"
-  fi
-
-  printf '%s\n' "$start_uid"
+get_donation_discovery_start_uid() {
+  [[ "${MAM_UID:-}" =~ ^[0-9]+$ ]] || fatal "MAM_UID is missing or invalid before donation discovery."
+  printf '%s\n' "$MAM_UID"
 }
 
-get_new_users_by_uid_scan() {
+uid_profile_is_valid() {
+  local uid="$1"
+  local response profile_uid username
+
+  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}" || true)"
+  [[ "$response" != "[]" ]] || return 1
+
+  profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
+  username="$(jq -r '.username // empty' <<< "$response" 2>/dev/null || true)"
+
+  [[ "$profile_uid" =~ ^[0-9]+$ && -n "$username" && "$username" != "null" ]]
+}
+
+find_latest_valid_uid() {
+  local start_uid step delay low high mid guard=0 max_guard=30
+
+  start_uid="$(get_donation_discovery_start_uid)"
+  step="${DONATION_LATEST_UID_STEP:-1000}"
+  delay="$DONATION_SCAN_DELAY_SECONDS"
+
+  valid_integer "$start_uid" || fatal "Latest UID discovery start must be numeric: $start_uid"
+  valid_integer "$step" || fatal "DONATION_LATEST_UID_STEP must be numeric: $step"
+  valid_integer "$delay" || fatal "DONATION_SCAN_DELAY_SECONDS must be numeric: $delay"
+  [[ "$step" -gt 0 ]] || fatal "DONATION_LATEST_UID_STEP must be greater than zero: $step"
+
+  log "Latest UID discovery: probing from start=${start_uid}, step=${step}, delay=${delay}s."
+
+  if uid_profile_is_valid "$start_uid"; then
+    low="$start_uid"
+    high=$((start_uid + step))
+
+    while uid_profile_is_valid "$high"; do
+      low="$high"
+      high=$((high + step))
+      guard=$((guard + 1))
+      [[ "$guard" -le "$max_guard" ]] || fatal "Latest UID discovery exceeded guard while searching upper empty UID."
+      [[ "$delay" -gt 0 ]] && sleep "$delay"
+    done
+  else
+    high="$start_uid"
+    low=$((start_uid - step))
+    [[ "$low" -lt 1 ]] && low=1
+
+    while ! uid_profile_is_valid "$low"; do
+      high="$low"
+      low=$((low - step))
+      [[ "$low" -lt 1 ]] && low=1
+      guard=$((guard + 1))
+      [[ "$guard" -le "$max_guard" ]] || fatal "Latest UID discovery exceeded guard while searching lower valid UID."
+      [[ "$low" -eq 1 ]] && break
+      [[ "$delay" -gt 0 ]] && sleep "$delay"
+    done
+  fi
+
+  log "Latest UID discovery interval: valid_low=${low}, empty_high=${high}."
+
+  while (( high - low > 1 )); do
+    mid=$(( (low + high) / 2 ))
+
+    if uid_profile_is_valid "$mid"; then
+      low="$mid"
+      debug "Latest UID discovery: valid ${mid}."
+    else
+      high="$mid"
+      debug "Latest UID discovery: empty ${mid}."
+    fi
+
+    [[ "$delay" -gt 0 ]] && sleep "$delay"
+  done
+
+  printf '%s\n' "$low"
+}
+
+get_new_users_by_latest_uid() {
   local start_uid lookback max_candidates delay scanned=0 found=0 uid response username profile_uid
 
-  start_uid="$(get_uid_scan_start)"
+  start_uid="$(find_latest_valid_uid)"
   lookback="$DONATION_SCAN_LOOKBACK"
   max_candidates="$DONATION_SCAN_MAX_CANDIDATES"
   delay="$DONATION_SCAN_DELAY_SECONDS"
@@ -141,7 +192,7 @@ get_new_users_by_uid_scan() {
   valid_integer "$max_candidates" || fatal "DONATION_SCAN_MAX_CANDIDATES must be numeric: $max_candidates"
   valid_integer "$delay" || fatal "DONATION_SCAN_DELAY_SECONDS must be numeric: $delay"
 
-  log "UID scan discovery: start=${start_uid}, lookback=${lookback}, max_candidates=${max_candidates}, delay=${delay}s."
+  log "Latest UID discovery result: latest_valid_uid=${start_uid}. Scanning backward lookback=${lookback}, max_candidates=${max_candidates}, delay=${delay}s."
 
   uid="$start_uid"
   while [[ "$scanned" -lt "$lookback" && "$uid" -gt 0 && "$found" -lt "$max_candidates" ]]; do
@@ -167,13 +218,7 @@ get_new_users_by_uid_scan() {
 }
 
 get_new_users() {
-  case "${DONATION_DISCOVERY_MODE:-uid_scan}" in
-    uid_scan) get_new_users_by_uid_scan ;;
-    page) get_new_users_from_page ;;
-    *)
-      fatal "Unsupported DONATION_DISCOVERY_MODE: ${DONATION_DISCOVERY_MODE}"
-      ;;
-  esac
+  get_new_users_by_latest_uid
 }
 
 human_size_to_bytes() {
