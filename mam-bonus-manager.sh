@@ -153,6 +153,7 @@ load_config() {
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 
+  CONFIG_VERSION="${MAM_CONFIG_VERSION:-${CONFIG_VERSION:-}}"
   DRY_RUN="${MAM_DRY_RUN:-${MAM_DRYRUN:-$DRY_RUN}}"
   VERBOSITY="${MAM_VERBOSITY:-${VERBOSITY:-1}}"
   LOG_FILE="${MAM_LOG_FILE:-${LOG_FILE:-}}"
@@ -273,6 +274,7 @@ config_migrate() {
   added_file="$(mktemp)"
 
   example_keys="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$example_file" | cut -d= -f1 | sort -u)"
+  example_config_version="$(grep -E '^CONFIG_VERSION=' "$example_file" | head -n1 | cut -d= -f2- || true)"
 
   # Comment active KEY=VALUE lines that are no longer present in config.env.example.
   # The example file is the source of truth for user-configurable settings.
@@ -286,6 +288,11 @@ config_migrate() {
         fi
         printf '# OBSOLETE: no longer present in config/config.env.example.\n' >> "$tmp_file"
         printf '# %s\n' "$line" >> "$tmp_file"
+        continue
+      fi
+
+      if [[ "$key" == "CONFIG_VERSION" && -n "$example_config_version" ]]; then
+        printf 'CONFIG_VERSION=%s\n' "$example_config_version" >> "$tmp_file"
         continue
       fi
     fi
@@ -334,6 +341,30 @@ config_migrate() {
 
   rm -f "$tmp_file" "$added_file"
 }
+
+
+auto_migrate_config_if_needed() {
+  local example_file example_version config_version
+
+  example_file="${SCRIPT_DIR}/config/config.env.example"
+
+  [[ -r "$CONFIG_FILE" ]] || return 0
+  [[ -r "$example_file" ]] || {
+    warn "Cannot auto-migrate config: example config not found at $example_file."
+    return 0
+  }
+
+  example_version="$(grep -E '^CONFIG_VERSION=' "$example_file" | head -n1 | cut -d= -f2- | tr -d '"'\''[:space:]' || true)"
+  config_version="$(grep -E '^CONFIG_VERSION=' "$CONFIG_FILE" | head -n1 | cut -d= -f2- | tr -d '"'\''[:space:]' || true)"
+
+  [[ -n "$example_version" ]] || return 0
+
+  if [[ "$config_version" != "$example_version" ]]; then
+    log "Config version '${config_version:-missing}' differs from expected version '${example_version}'. Running config migration."
+    config_migrate
+  fi
+}
+
 
 json_get() {
   local url="$1"
@@ -858,6 +889,7 @@ run_main() {
     return 0
   fi
 
+  auto_migrate_config_if_needed
   load_config
 
   exec 9>"$LOCK_FILE"

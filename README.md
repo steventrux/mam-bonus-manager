@@ -241,9 +241,11 @@ Manual mode includes:
 
 The `config` command creates the configuration file if it does not exist, or migrates an existing one by adding newly introduced settings from `config/config.env.example`.
 
+Configuration migration also runs automatically at startup when the `CONFIG_VERSION` value in `config.env` differs from the version shipped with the installed mam-bonus-manager release. This keeps Docker, systemd, cron and manual shell usage aligned after updates.
+
 Existing values are preserved. Settings that are no longer user-configurable are commented out automatically so they cannot interfere with newer releases.
 
-Use `config edit` to migrate the file and then open it in an editor. The editor is selected from `$EDITOR`, then `nano`, then `vi`.
+Use `config edit` to migrate the file manually and then open it in an editor. The editor is selected from `$EDITOR`, then `nano`, then `vi`.
 
 ### Session and balance checks
 
