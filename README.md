@@ -177,7 +177,7 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 
 Donation candidate discovery is automatic and does not require a manually configured starting UID.
 
-The script starts from the authenticated account UID, probes upward in configurable blocks until it finds an empty UID, uses binary search to identify the latest valid UID, and then scans backward from there to collect recent donation candidates.
+On the first run, the script starts from the authenticated account UID. After successful real donations have been recorded, discovery starts from the highest UID stored in `DONATION_STATE_FILE` instead, then probes upward in configurable blocks until it finds an empty UID, uses binary search to identify the latest valid UID, and scans backward from there to collect recent donation candidates.
 
 | Variable | Default | Description |
 | --- | ---: | --- |
@@ -186,7 +186,7 @@ The script starts from the authenticated account UID, probes upward in configura
 | `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles collected during discovery before donation filters are applied. This is not the number of donations sent. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Discovery limits how many recent profiles are collected; `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
+Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Starting from the highest previously donated UID only reduces discovery work on later runs; it does not bypass any recipient filter. Discovery limits how many recent profiles are collected; `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
 
 ### Notification settings
 
