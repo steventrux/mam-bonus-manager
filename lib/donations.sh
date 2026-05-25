@@ -132,7 +132,7 @@ uid_profile_is_valid() {
 }
 
 find_latest_valid_uid() {
-  local start_uid step delay low high mid guard=0 max_guard=30
+  local start_uid step delay low high mid next_uid guard=0 max_guard=30
 
   start_uid="$(get_donation_discovery_start_uid)"
   step="${DONATION_LATEST_UID_STEP:-1000}"
@@ -147,7 +147,18 @@ find_latest_valid_uid() {
 
   if uid_profile_is_valid "$start_uid"; then
     low="$start_uid"
-    high=$((start_uid + step))
+    next_uid=$((start_uid + 1))
+
+    if ! uid_profile_is_valid "$next_uid"; then
+      log "Latest UID discovery: next UID ${next_uid} is empty. Latest valid UID is ${low}."
+      printf '%s\n' "$low"
+      return 0
+    fi
+
+    low="$next_uid"
+    high=$((low + step))
+
+    [[ "$delay" -gt 0 ]] && sleep "$delay"
 
     while uid_profile_is_valid "$high"; do
       low="$high"
