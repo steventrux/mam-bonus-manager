@@ -361,11 +361,44 @@ plan_donation() {
   return 0
 }
 
+donation_browser_executor_path() {
+  if [[ -n "${DONATION_BROWSER_EXECUTOR:-}" ]]; then
+    printf '%s\n' "$DONATION_BROWSER_EXECUTOR"
+  else
+    printf '%s\n' "${SCRIPT_DIR}/scripts/mam-browser-gift.js"
+  fi
+}
+
+send_browser_donation() {
+  local uid="$1"
+  local amount="$2"
+  local executor profile_dir
+
+  executor="$(donation_browser_executor_path)"
+  [[ -r "$executor" ]] || {
+    warn "Browser donation executor not found or not readable: ${executor}"
+    return 1
+  }
+
+  command -v node >/dev/null 2>&1 || {
+    warn "Browser donation method requires node, but node was not found."
+    return 1
+  }
+
+  profile_dir="${MAM_BROWSER_PROFILE_DIR:-${WORKDIR}/browser-profile}"
+  MAM_BROWSER_PROFILE_DIR="$profile_dir" \
+  MAM_BROWSER_TIMEOUT="${MAM_BROWSER_TIMEOUT:-30000}" \
+  MAM_LOGIN_EMAIL="${MAM_LOGIN_EMAIL:-}" \
+  MAM_LOGIN_PASSWORD_FILE="${MAM_LOGIN_PASSWORD_FILE:-}" \
+  MAM_LOGIN_PASSWORD="${MAM_LOGIN_PASSWORD:-}" \
+    node "$executor" gift "$uid" "$amount"
+}
+
 send_donation() {
   local uid="$1"
   local username="$2"
   local amount="$3"
-  local now response success error_message refreshed_points before after actual_cost
+  local now response success error_message refreshed_points before after actual_cost method response_seedbonus response_to_name
 
   valid_integer "$amount" || fatal "Donation amount must be numeric: $amount"
   [[ "$amount" -gt 0 ]] || fatal "Donation amount must be greater than zero: $amount"
@@ -375,30 +408,53 @@ send_donation() {
     return 0
   fi
 
+  method="${DONATION_METHOD:-api}"
   before="$(get_points "$MAM_UID")"
-  now="$(date +%s%3N)"
-  response="$(json_get "${BASE_URL}/json/bonusBuy.php?spendtype=gift&amount=${amount}&giftTo=${uid}&_=${now}")" || {
-    warn "Donation to ${username} (uid=${uid}) failed: curl/API error."
-    return 1
-  }
+
+  case "$method" in
+    browser)
+      response="$(send_browser_donation "$uid" "$amount")" || {
+        warn "Donation to ${username} (uid=${uid}) failed through browser executor. Response: ${response:-empty}"
+        return 1
+      }
+      ;;
+    api)
+      now="$(date +%s%3N)"
+      response="$(json_get "${BASE_URL}/json/bonusBuy.php?spendtype=gift&amount=${amount}&giftTo=${uid}&_=${now}")" || {
+        warn "Donation to ${username} (uid=${uid}) failed: curl/API error."
+        return 1
+      }
+      ;;
+    *)
+      fatal "Unsupported DONATION_METHOD: ${method}. Supported values: api, browser."
+      ;;
+  esac
 
   success="$(jq -r '.success // empty' <<< "$response" 2>/dev/null || true)"
-  error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+  error_message="$(jq -r '.error // .response.error // empty' <<< "$response" 2>/dev/null || true)"
 
   if [[ "$success" != "true" ]]; then
-    warn "Donation to ${username} (uid=${uid}) was not confirmed. API error: ${error_message:-none}. Response: $response"
+    warn "Donation to ${username} (uid=${uid}) was not confirmed. Method=${method}. API error: ${error_message:-none}. Response: $response"
     return 1
   fi
 
-  refreshed_points="$(get_points "$MAM_UID")"
-  after="$refreshed_points"
+  response_seedbonus="$(jq -r '.response.seedbonus // .afterSeedbonus // empty' <<< "$response" 2>/dev/null || true)"
+  response_to_name="$(jq -r '.response.toName // empty' <<< "$response" 2>/dev/null || true)"
+
+  if valid_number "$response_seedbonus"; then
+    after="$(int_part "$response_seedbonus")"
+  else
+    refreshed_points="$(get_points "$MAM_UID")"
+    after="$refreshed_points"
+  fi
+
   actual_cost=$((before - after))
   [[ "$actual_cost" -lt 0 ]] && actual_cost="$amount"
   [[ "$actual_cost" -eq 0 ]] && actual_cost="$amount"
 
   record_donation "$uid" "$username" "$actual_cost"
-  record_purchase donation "$username" "$actual_cost"
-  log "Donation sent to ${username} (uid=${uid}): ${actual_cost} bonus point(s). Points after donation: ${after}."
+  record_purchase donation "${response_to_name:-$username}" "$actual_cost"
+  log "Donation sent to ${response_to_name:-$username} (uid=${uid}) through ${method}: ${actual_cost} bonus point(s). Points after donation: ${after}."
   return 0
 }
 
