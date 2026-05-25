@@ -50,7 +50,7 @@ Upload credit is controlled by point availability and the ratio threshold. With 
 
 Wedges are disabled by default. Set `WEDGE_HOURS` to a value greater than `0` to enable automatic wedge purchases. The automated wedge step also respects `BONUS_RESERVE_POINTS`.
 
-Donations run last and use only points above `BONUS_RESERVE_POINTS`. They are also skipped when the current ratio is below `UPLOAD_RATIO_THRESHOLD`, so points can accumulate for upload credit instead of being donated while the ratio is low. Donations also apply cooldown history, max candidates per run, recipient uploaded-amount filtering and the cumulative per-user donation limit.
+Donations run last and use only points above `BONUS_RESERVE_POINTS`. They are also skipped when the current ratio is below `UPLOAD_RATIO_THRESHOLD`, so points can accumulate for upload credit instead of being donated while the ratio is low. Donations also apply cooldown history, max recipients per run, recipient uploaded-amount filtering and the cumulative per-user donation limit.
 
 With `--dry-run`, purchases and donations are only printed. Without `--dry-run`, enabled spending actions are sent to MAM and successful actions are recorded in the local TSV history files.
 
@@ -167,7 +167,7 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 | --- | ---: | --- |
 | `DONATIONS` | `0` | Set to `1` to enable the automated donation step and donation planner. |
 | `DONATION_AMOUNT` | `100` | Points donated per user in automated donation mode. |
-| `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum number of actual donation recipients per automatic run. This limits real donations sent, not the number of profiles scanned. |
+| `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum number of actual donation recipients per automatic run. The discovery phase automatically collects up to twice this value as valid candidate profiles. |
 | `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
@@ -183,8 +183,9 @@ On the first run, the script starts from the authenticated account UID. After su
 | --- | ---: | --- |
 | `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used to find a valid/empty interval before binary search. |
 | `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of recent UIDs to check while scanning backward from the latest valid UID. |
-| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles collected during discovery before donation filters are applied. This is not the number of donations sent. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
+
+The number of valid UID profiles collected during discovery is not directly configurable. It is derived automatically as `DONATION_MAX_USERS_PER_RUN * 2`, so the scan keeps a small buffer of candidates without exposing a second overlapping setting.
 
 Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Starting from the highest previously donated UID only reduces discovery work on later runs; it does not bypass any recipient filter. Discovery limits how many recent profiles are collected; `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
 
