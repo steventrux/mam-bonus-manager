@@ -18,13 +18,25 @@ Environment:
   MAM_BROWSER_PROFILE_DIR   Persistent Chromium profile directory. Default: ./.mam-browser-profile
   MAM_BROWSER_HEADLESS      1=headless, 0=visible browser. Default: 1
   MAM_BROWSER_TIMEOUT       Timeout in ms. Default: 30000
-  MAM_LOGIN_EMAIL           Optional, not used yet in check-login mode
-  MAM_LOGIN_PASSWORD        Optional, not used yet in check-login mode
-  MAM_LOGIN_PASSWORD_FILE   Optional, not used yet in check-login mode`);
+  MAM_LOGIN_EMAIL           MAM login email. Required only when automatic login is needed
+  MAM_LOGIN_PASSWORD        MAM login password. Prefer MAM_LOGIN_PASSWORD_FILE
+  MAM_LOGIN_PASSWORD_FILE   File containing the MAM login password`);
 }
 
 function printJson(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+function readPassword() {
+  if (process.env.MAM_LOGIN_PASSWORD_FILE) {
+    return fs.readFileSync(process.env.MAM_LOGIN_PASSWORD_FILE, 'utf8').trim();
+  }
+
+  return process.env.MAM_LOGIN_PASSWORD || '';
+}
+
+function hasLoginCredentials() {
+  return Boolean(process.env.MAM_LOGIN_EMAIL && (process.env.MAM_LOGIN_PASSWORD || process.env.MAM_LOGIN_PASSWORD_FILE));
 }
 
 async function readSummary(page) {
@@ -57,6 +69,70 @@ async function readSummary(page) {
   });
 }
 
+function summaryIdentity(summary) {
+  const uid = summary && summary.data ? summary.data.uid : null;
+  const username = summary && summary.data ? summary.data.username : null;
+  const seedbonus = summary && summary.data ? summary.data.seedbonus : null;
+  return { uid, username, seedbonus };
+}
+
+async function ensureLogin(page) {
+  const email = process.env.MAM_LOGIN_EMAIL || '';
+  const password = readPassword();
+
+  if (!email || !password) {
+    return {
+      attempted: false,
+      success: false,
+      error: 'missing_login_credentials',
+    };
+  }
+
+  await page.goto(`${BASE_URL}/login.php`, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+
+  const emailInput = page.locator('input[name="email"]');
+  const passwordInput = page.locator('input[name="password"]');
+  const rememberInput = page.locator('input[name="rememberMe"]');
+
+  await emailInput.waitFor({ state: 'visible', timeout: TIMEOUT });
+  await emailInput.fill(email);
+  await passwordInput.fill(password);
+
+  if (await rememberInput.count()) {
+    await rememberInput.check().catch(() => {});
+  }
+
+  await Promise.all([
+    page.waitForLoadState('domcontentloaded', { timeout: TIMEOUT }).catch(() => {}),
+    page.locator('input[type="submit"]').first().click(),
+  ]);
+
+  await page.waitForTimeout(1500);
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+
+  const summary = await readSummary(page);
+  const { uid, username, seedbonus } = summaryIdentity(summary);
+
+  if (summary.ok && uid) {
+    return {
+      attempted: true,
+      success: true,
+      uid,
+      username,
+      seedbonus,
+    };
+  }
+
+  return {
+    attempted: true,
+    success: false,
+    error: summary.error || 'login_failed_or_invalid_summary',
+    httpStatus: summary.httpStatus,
+    contentType: summary.contentType,
+    preview: summary.preview,
+  };
+}
+
 async function checkLogin() {
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
 
@@ -72,19 +148,51 @@ async function checkLogin() {
 
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
 
-    const summary = await readSummary(page);
-    const uid = summary && summary.data ? summary.data.uid : null;
-    const username = summary && summary.data ? summary.data.username : null;
-    const seedbonus = summary && summary.data ? summary.data.seedbonus : null;
+    const initialSummary = await readSummary(page);
+    const initialIdentity = summaryIdentity(initialSummary);
 
-    if (summary.ok && uid) {
+    if (initialSummary.ok && initialIdentity.uid) {
       printJson({
         success: true,
         mode: 'check-login',
         loggedIn: true,
-        uid,
-        username,
-        seedbonus,
+        loginAttempted: false,
+        uid: initialIdentity.uid,
+        username: initialIdentity.username,
+        seedbonus: initialIdentity.seedbonus,
+        profileDir: PROFILE_DIR,
+        headless: HEADLESS,
+      });
+      return 0;
+    }
+
+    if (!hasLoginCredentials()) {
+      printJson({
+        success: false,
+        mode: 'check-login',
+        loggedIn: false,
+        loginAttempted: false,
+        error: initialSummary.error || 'not_logged_in_or_invalid_summary',
+        httpStatus: initialSummary.httpStatus,
+        contentType: initialSummary.contentType,
+        preview: initialSummary.preview,
+        hint: 'Set MAM_LOGIN_EMAIL and MAM_LOGIN_PASSWORD_FILE to enable automatic login.',
+        profileDir: PROFILE_DIR,
+        headless: HEADLESS,
+      });
+      return 2;
+    }
+
+    const loginResult = await ensureLogin(page);
+    if (loginResult.success) {
+      printJson({
+        success: true,
+        mode: 'check-login',
+        loggedIn: true,
+        loginAttempted: true,
+        uid: loginResult.uid,
+        username: loginResult.username,
+        seedbonus: loginResult.seedbonus,
         profileDir: PROFILE_DIR,
         headless: HEADLESS,
       });
@@ -95,14 +203,15 @@ async function checkLogin() {
       success: false,
       mode: 'check-login',
       loggedIn: false,
-      error: summary.error || 'not_logged_in_or_invalid_summary',
-      httpStatus: summary.httpStatus,
-      contentType: summary.contentType,
-      preview: summary.preview,
+      loginAttempted: loginResult.attempted,
+      error: loginResult.error,
+      httpStatus: loginResult.httpStatus,
+      contentType: loginResult.contentType,
+      preview: loginResult.preview,
       profileDir: PROFILE_DIR,
       headless: HEADLESS,
     });
-    return 2;
+    return 3;
   } finally {
     await context.close();
   }
