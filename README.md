@@ -167,7 +167,7 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 | --- | ---: | --- |
 | `DONATIONS` | `0` | Set to `1` to enable the automated donation step and donation planner. |
 | `DONATION_AMOUNT` | `100` | Points donated per user in automated donation mode. |
-| `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum new-user donation candidates per automatic run. |
+| `DONATION_MAX_USERS_PER_RUN` | `5` | Maximum number of actual donation recipients per automatic run. This limits real donations sent, not the number of profiles scanned. |
 | `DONATION_MAX_POINTS_PER_USER` | `1000` | Maximum cumulative points that can be donated to the same user, based on `DONATION_STATE_FILE`. Set to `0` to disable this limit. |
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
@@ -183,10 +183,10 @@ The script starts from the authenticated account UID, probes upward in configura
 | --- | ---: | --- |
 | `DONATION_LATEST_UID_STEP` | `1000` | UID probing step used to find a valid/empty interval before binary search. |
 | `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of recent UIDs to check while scanning backward from the latest valid UID. |
-| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles returned by discovery before donation filters are applied. |
+| `DONATION_SCAN_MAX_CANDIDATES` | `20` | Maximum number of valid UID profiles collected during discovery before donation filters are applied. This is not the number of donations sent. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve.
+Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Discovery limits how many recent profiles are collected; `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
 
 ### Notification settings
 
