@@ -103,7 +103,18 @@ get_max_donated_uid() {
 }
 
 get_donation_discovery_start_uid() {
+  local max_donated_uid
+
   [[ "${MAM_UID:-}" =~ ^[0-9]+$ ]] || fatal "MAM_UID is missing or invalid before donation discovery."
+
+  max_donated_uid="$(get_max_donated_uid)"
+  if [[ "$max_donated_uid" =~ ^[0-9]+$ && "$max_donated_uid" -gt "$MAM_UID" ]]; then
+    log "Donation discovery start UID: using latest donated UID from history (${max_donated_uid}) instead of account UID (${MAM_UID})."
+    printf '%s\n' "$max_donated_uid"
+    return 0
+  fi
+
+  log "Donation discovery start UID: using account UID (${MAM_UID})."
   printf '%s\n' "$MAM_UID"
 }
 
