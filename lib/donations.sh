@@ -196,12 +196,14 @@ get_new_users_by_latest_uid() {
 
   start_uid="$(find_latest_valid_uid)"
   lookback="$DONATION_SCAN_LOOKBACK"
-  max_candidates="$DONATION_SCAN_MAX_CANDIDATES"
   delay="$DONATION_SCAN_DELAY_SECONDS"
 
   valid_integer "$lookback" || fatal "DONATION_SCAN_LOOKBACK must be numeric: $lookback"
-  valid_integer "$max_candidates" || fatal "DONATION_SCAN_MAX_CANDIDATES must be numeric: $max_candidates"
+  valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
   valid_integer "$delay" || fatal "DONATION_SCAN_DELAY_SECONDS must be numeric: $delay"
+
+  DONATION_SCAN_MAX_CANDIDATES=$((DONATION_MAX_USERS_PER_RUN * 2))
+  max_candidates="$DONATION_SCAN_MAX_CANDIDATES"
 
   log "Latest UID discovery result: latest_valid_uid=${start_uid}. Scanning backward lookback=${lookback}, max_candidates=${max_candidates}, delay=${delay}s."
 
