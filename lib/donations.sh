@@ -13,6 +13,45 @@ record_donation() {
   chmod 600 "$DONATION_STATE_FILE" 2>/dev/null || true
 }
 
+record_donation_exclusion() {
+  local uid="$1"
+  local username="$2"
+  local reason="$3"
+  local value="${4:-}"
+
+  [[ -n "$uid" ]] || return 0
+  [[ -n "$reason" ]] || return 0
+
+  mkdir -p "$(dirname "$DONATION_EXCLUSION_FILE")"
+  touch "$DONATION_EXCLUSION_FILE"
+  chmod 600 "$DONATION_EXCLUSION_FILE" 2>/dev/null || true
+
+  if awk -F '\t' -v uid="$uid" -v reason="$reason" '$3 == uid && $5 == reason { found=1 } END { exit found ? 0 : 1 }' "$DONATION_EXCLUSION_FILE"; then
+    return 0
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%s')" "$(date '+%Y-%m-%d')" "$uid" "$username" "$reason" "$value" >> "$DONATION_EXCLUSION_FILE"
+}
+
+donation_excluded() {
+  local uid="$1"
+  local ts date_field uid_field username_field reason_field value_field
+
+  [[ -s "$DONATION_EXCLUSION_FILE" ]] || return 1
+
+  while IFS=$'\t' read -r ts date_field uid_field username_field reason_field value_field; do
+    [[ "$uid_field" == "$uid" ]] || continue
+    case "$reason_field" in
+      empty_profile|uploaded_too_high)
+        debug "Donation UID ${uid} skipped by persistent exclusion: ${reason_field}${value_field:+ (${value_field})}."
+        return 0
+        ;;
+    esac
+  done < "$DONATION_EXCLUSION_FILE"
+
+  return 1
+}
+
 donation_recently_sent() {
   local uid="$1"
   local username="$2"
@@ -122,8 +161,15 @@ uid_profile_is_valid() {
   local uid="$1"
   local response profile_uid username
 
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}" || true)"
-  [[ "$response" != "[]" ]] || return 1
+  if donation_excluded "$uid"; then
+    return 1
+  fi
+
+  response="$(get_profile_json "$uid" || true)"
+  if [[ "$response" == "[]" ]]; then
+    record_donation_exclusion "$uid" "" "empty_profile" ""
+    return 1
+  fi
 
   profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
   username="$(jq -r '.username // empty' <<< "$response" 2>/dev/null || true)"
@@ -213,26 +259,66 @@ get_new_users_by_latest_uid() {
   valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
   valid_integer "$delay" || fatal "DONATION_SCAN_DELAY_SECONDS must be numeric: $delay"
 
-  DONATION_SCAN_MAX_CANDIDATES=$((DONATION_MAX_USERS_PER_RUN * 2))
-  max_candidates="$DONATION_SCAN_MAX_CANDIDATES"
+  max_candidates="$DONATION_MAX_USERS_PER_RUN"
 
-  log "Latest UID discovery result: latest_valid_uid=${start_uid}. Scanning backward lookback=${lookback}, max_candidates=${max_candidates}, delay=${delay}s."
+  log "Latest UID discovery result: latest_valid_uid=${start_uid}. Scanning backward lookback=${lookback}, target_eligible_candidates=${max_candidates}, delay=${delay}s."
 
   uid="$start_uid"
   while [[ "$scanned" -lt "$lookback" && "$uid" -gt 0 && "$found" -lt "$max_candidates" ]]; do
-    response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}" || true)"
+    scanned=$((scanned + 1))
 
-    if [[ "$response" != "[]" ]]; then
-      profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
-      username="$(jq -r '.username // empty' <<< "$response" 2>/dev/null || true)"
-
-      if [[ "$profile_uid" =~ ^[0-9]+$ && -n "$username" && "$username" != "null" ]]; then
-        printf '%s\t%s\n' "$profile_uid" "$username" 2>/dev/null || return 0
-        found=$((found + 1))
-      fi
+    if donation_excluded "$uid"; then
+      uid=$((uid - 1))
+      continue
     fi
 
-    scanned=$((scanned + 1))
+    if donation_recently_sent "$uid" ""; then
+      debug "Donation UID ${uid} skipped before profile lookup: cooldown active from local history."
+      uid=$((uid - 1))
+      continue
+    fi
+
+    if ! donation_user_limit_allowed "$uid" "" "$DONATION_AMOUNT"; then
+      debug "Donation UID ${uid} skipped before profile lookup: per-user limit reached from local history."
+      uid=$((uid - 1))
+      continue
+    fi
+
+    response="$(get_profile_json "$uid" || true)"
+
+    if [[ "$response" == "[]" ]]; then
+      record_donation_exclusion "$uid" "" "empty_profile" ""
+      uid=$((uid - 1))
+      continue
+    fi
+
+    profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
+    username="$(jq -r '.username // empty' <<< "$response" 2>/dev/null || true)"
+
+    if [[ ! "$profile_uid" =~ ^[0-9]+$ || -z "$username" || "$username" == "null" ]]; then
+      uid=$((uid - 1))
+      continue
+    fi
+
+    if donation_recently_sent "$profile_uid" "$username"; then
+      debug "Donation candidate skipped for ${username} (uid=${profile_uid}): cooldown active."
+      uid=$((uid - 1))
+      continue
+    fi
+
+    if ! donation_user_limit_allowed "$profile_uid" "$username" "$DONATION_AMOUNT"; then
+      uid=$((uid - 1))
+      continue
+    fi
+
+    if ! donation_recipient_upload_allowed "$profile_uid" "$username"; then
+      uid=$((uid - 1))
+      continue
+    fi
+
+    printf '%s\t%s\n' "$profile_uid" "$username" 2>/dev/null || return 0
+    found=$((found + 1))
+
     uid=$((uid - 1))
 
     if [[ "$delay" -gt 0 && "$scanned" -lt "$lookback" && "$found" -lt "$max_candidates" ]]; then
@@ -270,7 +356,7 @@ get_recipient_uploaded_bytes() {
   local uid="$1"
   local response uploaded_bytes uploaded_text converted
 
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+  response="$(get_profile_json "$uid")" || return 1
 
   uploaded_bytes="$(jq -r '.uploaded_bytes // empty' <<< "$response" 2>/dev/null || true)"
   if valid_integer "$uploaded_bytes"; then
@@ -312,24 +398,13 @@ donation_recipient_upload_allowed() {
   fi
 
   log "Donation candidate skipped for ${username} (uid=${uid}): uploaded_bytes ${uploaded_bytes} > ${threshold}."
+  record_donation_exclusion "$uid" "$username" "uploaded_too_high" "$uploaded_bytes"
   return 1
 }
 
 
 get_donation_candidates() {
-  local uid username
-
-  while IFS=$'\t' read -r uid username; do
-    [[ -n "$uid" && -n "$username" ]] || continue
-    if donation_recently_sent "$uid" "$username"; then
-      debug "Donation candidate skipped for ${username} (uid=${uid}): cooldown active."
-      continue
-    fi
-    if ! donation_recipient_upload_allowed "$uid" "$username"; then
-      continue
-    fi
-    printf '%s\t%s\n' "$uid" "$username" 2>/dev/null || return 0
-  done < <(get_new_users)
+  get_new_users
 }
 
 count_donation_candidates() {
@@ -361,44 +436,76 @@ plan_donation() {
   return 0
 }
 
+send_browser_donation() {
+  local uid="$1"
+  local amount="$2"
+  local executor profile_dir
+
+  executor="${SCRIPT_DIR}/scripts/mam-browser-gift.js"
+  [[ -r "$executor" ]] || {
+    warn "Browser donation executor not found or not readable: ${executor}"
+    return 1
+  }
+
+  command -v node >/dev/null 2>&1 || {
+    warn "Browser donation method requires node, but node was not found."
+    return 1
+  }
+
+  profile_dir="${MAM_BROWSER_PROFILE_DIR:-${WORKDIR}/browser-profile}"
+  MAM_BROWSER_PROFILE_DIR="$profile_dir" \
+  MAM_BROWSER_TIMEOUT="${MAM_BROWSER_TIMEOUT:-30000}" \
+  MAM_LOGIN_EMAIL="${MAM_LOGIN_EMAIL:-}" \
+  MAM_LOGIN_PASSWORD_FILE="${MAM_LOGIN_PASSWORD_FILE:-}" \
+  MAM_LOGIN_PASSWORD="${MAM_LOGIN_PASSWORD:-}" \
+    node "$executor" gift "$uid" "$amount"
+}
+
 send_donation() {
   local uid="$1"
   local username="$2"
   local amount="$3"
-  local now response success error_message refreshed_points before after actual_cost
+  local response success error_message refreshed_points before after actual_cost response_seedbonus response_to_name
 
   valid_integer "$amount" || fatal "Donation amount must be numeric: $amount"
   [[ "$amount" -gt 0 ]] || fatal "Donation amount must be greater than zero: $amount"
 
   if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
-    log "DRY-RUN: would donate ${amount} bonus point(s) to ${username} (uid=${uid})."
+    log "DRY-RUN: would donate ${amount} bonus point(s) to ${username} (uid=${uid}) through browser executor."
     return 0
   fi
 
   before="$(get_points "$MAM_UID")"
-  now="$(date +%s%3N)"
-  response="$(json_get "${BASE_URL}/json/bonusBuy.php?spendtype=gift&amount=${amount}&giftTo=${uid}&_=${now}")" || {
-    warn "Donation to ${username} (uid=${uid}) failed: curl/API error."
+  response="$(send_browser_donation "$uid" "$amount")" || {
+    warn "Donation to ${username} (uid=${uid}) failed through browser executor. Response: ${response:-empty}"
     return 1
   }
 
   success="$(jq -r '.success // empty' <<< "$response" 2>/dev/null || true)"
-  error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+  error_message="$(jq -r '.error // .response.error // empty' <<< "$response" 2>/dev/null || true)"
 
   if [[ "$success" != "true" ]]; then
-    warn "Donation to ${username} (uid=${uid}) was not confirmed. API error: ${error_message:-none}. Response: $response"
+    warn "Donation to ${username} (uid=${uid}) was not confirmed through browser executor. API error: ${error_message:-none}. Response: $response"
     return 1
   fi
 
-  refreshed_points="$(get_points "$MAM_UID")"
-  after="$refreshed_points"
+  response_seedbonus="$(jq -r '.response.seedbonus // .afterSeedbonus // empty' <<< "$response" 2>/dev/null || true)"
+  response_to_name="$(jq -r '.response.toName // empty' <<< "$response" 2>/dev/null || true)"
+
+  if valid_number "$response_seedbonus"; then
+    after="$(int_part "$response_seedbonus")"
+  else
+    refreshed_points="$(get_points "$MAM_UID")"
+    after="$refreshed_points"
+  fi
+
   actual_cost=$((before - after))
   [[ "$actual_cost" -lt 0 ]] && actual_cost="$amount"
   [[ "$actual_cost" -eq 0 ]] && actual_cost="$amount"
 
   record_donation "$uid" "$username" "$actual_cost"
-  record_purchase donation "$username" "$actual_cost"
-  log "Donation sent to ${username} (uid=${uid}): ${actual_cost} bonus point(s). Points after donation: ${after}."
+  record_purchase donation "${response_to_name:-$username}" "$actual_cost"
+  log "Donation sent to ${response_to_name:-$username} (uid=${uid}) through browser executor: ${actual_cost} bonus point(s). Points after donation: ${after}."
   return 0
 }
 
@@ -412,6 +519,12 @@ donate_to_new_users_if_enabled() {
   valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
   valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
 
+  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
+    log "Donation step skipped: points ${points} are not above BONUS_RESERVE_POINTS ${BONUS_RESERVE_POINTS}."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
   if ! number_le_zero "$UPLOAD_RATIO_THRESHOLD"; then
     current_ratio="$(get_ratio "$MAM_UID")" || {
       warn "Could not read current ratio; skipping automated donations for safety."
@@ -424,12 +537,6 @@ donate_to_new_users_if_enabled() {
       printf '%s\n' "$points"
       return 0
     fi
-  fi
-
-  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
-    log "Donation step skipped: points ${points} are not above BONUS_RESERVE_POINTS ${BONUS_RESERVE_POINTS}."
-    printf '%s\n' "$points"
-    return 0
   fi
 
   spendable=$((points - BONUS_RESERVE_POINTS))
