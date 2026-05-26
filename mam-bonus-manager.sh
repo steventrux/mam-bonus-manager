@@ -421,9 +421,22 @@ ensure_session() {
   printf '%s\n' "$uid"
 }
 
+get_profile_json() {
+  local uid="$1" response error_message
+  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+
+  error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+  if [[ -n "$error_message" && "$error_message" != "null" ]]; then
+    warn "MAM profile API error for uid=${uid}: ${error_message}"
+    return 1
+  fi
+
+  printf '%s' "$response"
+}
+
 get_points() {
   local uid="$1" response points
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || fatal "Could not read seedbonus balance."
+  response="$(get_profile_json "$uid")" || fatal "Could not read seedbonus balance."
   points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
   valid_number "$points" || fatal "Invalid seedbonus value in JSON response: ${points:-empty}"
   int_part "$points"
@@ -431,9 +444,12 @@ get_points() {
 
 get_ratio() {
   local uid="$1" response ratio
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+  response="$(get_profile_json "$uid")" || return 1
   ratio="$(jq -r '.ratio // .ratio_real // .uploaded_downloaded_ratio // empty' <<< "$response" 2>/dev/null | head -n1 | tr -d ',' || true)"
-  valid_number "$ratio" || return 1
+  valid_number "$ratio" || {
+    warn "MAM profile JSON for uid=${uid} does not contain a valid ratio."
+    return 1
+  }
   printf '%s\n' "$ratio"
 }
 
