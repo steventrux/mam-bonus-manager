@@ -398,43 +398,27 @@ send_donation() {
   local uid="$1"
   local username="$2"
   local amount="$3"
-  local now response success error_message refreshed_points before after actual_cost method response_seedbonus response_to_name
+  local response success error_message refreshed_points before after actual_cost response_seedbonus response_to_name
 
   valid_integer "$amount" || fatal "Donation amount must be numeric: $amount"
   [[ "$amount" -gt 0 ]] || fatal "Donation amount must be greater than zero: $amount"
 
   if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
-    log "DRY-RUN: would donate ${amount} bonus point(s) to ${username} (uid=${uid})."
+    log "DRY-RUN: would donate ${amount} bonus point(s) to ${username} (uid=${uid}) through browser executor."
     return 0
   fi
 
-  method="${DONATION_METHOD:-api}"
   before="$(get_points "$MAM_UID")"
-
-  case "$method" in
-    browser)
-      response="$(send_browser_donation "$uid" "$amount")" || {
-        warn "Donation to ${username} (uid=${uid}) failed through browser executor. Response: ${response:-empty}"
-        return 1
-      }
-      ;;
-    api)
-      now="$(date +%s%3N)"
-      response="$(json_get "${BASE_URL}/json/bonusBuy.php?spendtype=gift&amount=${amount}&giftTo=${uid}&_=${now}")" || {
-        warn "Donation to ${username} (uid=${uid}) failed: curl/API error."
-        return 1
-      }
-      ;;
-    *)
-      fatal "Unsupported DONATION_METHOD: ${method}. Supported values: api, browser."
-      ;;
-  esac
+  response="$(send_browser_donation "$uid" "$amount")" || {
+    warn "Donation to ${username} (uid=${uid}) failed through browser executor. Response: ${response:-empty}"
+    return 1
+  }
 
   success="$(jq -r '.success // empty' <<< "$response" 2>/dev/null || true)"
   error_message="$(jq -r '.error // .response.error // empty' <<< "$response" 2>/dev/null || true)"
 
   if [[ "$success" != "true" ]]; then
-    warn "Donation to ${username} (uid=${uid}) was not confirmed. Method=${method}. API error: ${error_message:-none}. Response: $response"
+    warn "Donation to ${username} (uid=${uid}) was not confirmed through browser executor. API error: ${error_message:-none}. Response: $response"
     return 1
   fi
 
@@ -454,7 +438,7 @@ send_donation() {
 
   record_donation "$uid" "$username" "$actual_cost"
   record_purchase donation "${response_to_name:-$username}" "$actual_cost"
-  log "Donation sent to ${response_to_name:-$username} (uid=${uid}) through ${method}: ${actual_cost} bonus point(s). Points after donation: ${after}."
+  log "Donation sent to ${response_to_name:-$username} (uid=${uid}) through browser executor: ${actual_cost} bonus point(s). Points after donation: ${after}."
   return 0
 }
 
