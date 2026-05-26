@@ -444,6 +444,12 @@ donate_to_new_users_if_enabled() {
   valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
   valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
 
+  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
+    log "Donation step skipped: points ${points} are not above BONUS_RESERVE_POINTS ${BONUS_RESERVE_POINTS}."
+    printf '%s\n' "$points"
+    return 0
+  fi
+
   if ! number_le_zero "$UPLOAD_RATIO_THRESHOLD"; then
     current_ratio="$(get_ratio "$MAM_UID")" || {
       warn "Could not read current ratio; skipping automated donations for safety."
@@ -456,12 +462,6 @@ donate_to_new_users_if_enabled() {
       printf '%s\n' "$points"
       return 0
     fi
-  fi
-
-  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
-    log "Donation step skipped: points ${points} are not above BONUS_RESERVE_POINTS ${BONUS_RESERVE_POINTS}."
-    printf '%s\n' "$points"
-    return 0
   fi
 
   spendable=$((points - BONUS_RESERVE_POINTS))

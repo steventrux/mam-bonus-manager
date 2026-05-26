@@ -732,9 +732,16 @@ buy_wedge_if_needed() {
 }
 
 buy_upload_until_buffer() {
-  local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio purchased_any=0
+  local points="$1" pack required now response new_points error_message refreshed_points pack_cost current_ratio purchased_any=0 min_upload_cost
   valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
   valid_number "$UPLOAD_RATIO_THRESHOLD" || fatal "UPLOAD_RATIO_THRESHOLD must be numeric: $UPLOAD_RATIO_THRESHOLD"
+
+  min_upload_cost=$((MIN_UPLOAD_GB * 500))
+  if [[ "$points" -lt "$min_upload_cost" ]]; then
+    log "Upload credit skipped: points ${points} are below minimum upload package cost ${min_upload_cost}."
+    printf '%s\n' "$points"
+    return 0
+  fi
 
   if ! number_le_zero "$UPLOAD_RATIO_THRESHOLD"; then
     current_ratio="$(get_ratio "$MAM_UID")" || {
