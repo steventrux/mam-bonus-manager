@@ -93,7 +93,7 @@ sudo apt install -y curl jq util-linux findutils grep sed gawk
 
 `awk` is required by the donation candidate parser. On Debian/Ubuntu, `gawk` or the default `awk` provider is sufficient.
 
-Local browser dependencies are required only for real gift donations outside Docker:
+The browser executor is always used for gift donations. Docker images already include the browser runtime. For local shell/systemd usage outside Docker, install the local browser dependencies:
 
 ```bash
 npm install
@@ -182,7 +182,6 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
-| `DONATION_BROWSER_EXECUTOR` | bundled script | Optional path to a custom browser gift executor. Leave empty for normal usage. |
 | `MAM_BROWSER_PROFILE_DIR` | `$WORKDIR/browser-profile` | Persistent Chromium profile directory used by the browser executor. |
 | `MAM_BROWSER_TIMEOUT` | `30000` | Browser executor timeout in milliseconds. |
 | `MAM_LOGIN_EMAIL` | empty | MAM web-login email used when the browser profile is not already logged in. |
@@ -194,7 +193,7 @@ Gift donations are intentionally browser-only. The previous direct API/curl gift
 
 Gift donations are sent through the bundled Playwright/Chromium browser executor. The executor uses a persistent browser profile, so after the first successful login it can usually reuse the existing browser session.
 
-For local real donation tests outside Docker, set these values in `config.env`:
+For local shell/systemd usage outside Docker, set these values in `config.env`:
 
 ```bash
 MAM_BROWSER_PROFILE_DIR="$PWD/.mam-browser-profile"
@@ -202,7 +201,7 @@ MAM_LOGIN_EMAIL="your_mam_email"
 MAM_LOGIN_PASSWORD_FILE="$PWD/.mam-secrets/mam-password"
 ```
 
-Create the password file before running real donations:
+Create the password file before enabling donations:
 
 ```bash
 mkdir -p .mam-secrets

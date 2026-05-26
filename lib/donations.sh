@@ -361,20 +361,12 @@ plan_donation() {
   return 0
 }
 
-donation_browser_executor_path() {
-  if [[ -n "${DONATION_BROWSER_EXECUTOR:-}" ]]; then
-    printf '%s\n' "$DONATION_BROWSER_EXECUTOR"
-  else
-    printf '%s\n' "${SCRIPT_DIR}/scripts/mam-browser-gift.js"
-  fi
-}
-
 send_browser_donation() {
   local uid="$1"
   local amount="$2"
   local executor profile_dir
 
-  executor="$(donation_browser_executor_path)"
+  executor="${SCRIPT_DIR}/scripts/mam-browser-gift.js"
   [[ -r "$executor" ]] || {
     warn "Browser donation executor not found or not readable: ${executor}"
     return 1
