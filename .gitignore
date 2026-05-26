@@ -21,3 +21,26 @@ wedge.last
 # Docker local runtime
 docker-config/
 docker-data/
+
+# Local Playwright/MAM browser executor state
+.mam-browser-profile/
+.mam-secrets/
+node_modules/
+package-lock.json
+config.env.bak.*
+
+# Local Playwright/MAM browser executor state
+.mam-browser-profile/
+.mam-secrets/
+node_modules/
+package-lock.json
+config.env.bak.*
+config.env.before-browser-test.*
+
+# Local Playwright/MAM browser executor state
+.mam-browser-profile/
+.mam-secrets/
+node_modules/
+package-lock.json
+config.env.bak.*
+config.env.before-browser-test.*
