@@ -224,9 +224,16 @@ On the first run, the script starts from the authenticated account UID. After su
 | `DONATION_SCAN_LOOKBACK` | `100` | Maximum number of recent UIDs to check while scanning backward from the latest valid UID. |
 | `DONATION_SCAN_DELAY_SECONDS` | `1` | Delay between UID checks. Use `0` only for short tests. |
 
-The number of valid UID profiles collected during discovery is not directly configurable. It is derived automatically as `DONATION_MAX_USERS_PER_RUN * 2`, so the scan keeps a small buffer of candidates without exposing a second overlapping setting.
+The scan walks backward from the latest valid UID until it finds up to `DONATION_MAX_USERS_PER_RUN` eligible donation candidates, or until `DONATION_SCAN_LOOKBACK` is reached. Eligibility filters are applied during the scan, so the script does not collect a separate raw-candidate buffer.
 
-Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Starting from the highest previously donated UID only reduces discovery work on later runs; it does not bypass any recipient filter. Discovery limits how many recent profiles are collected; `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
+Discovered users still go through the normal donation filters: cooldown history, recipient uploaded-amount threshold, cumulative per-user donation limit and the automated `BONUS_RESERVE_POINTS` reserve. Starting from the highest previously donated UID only reduces discovery work on later runs; it does not bypass any recipient filter. `DONATION_MAX_USERS_PER_RUN` limits how many actual donations are sent in one automatic run.
+
+To reduce profile API calls on later runs, the script keeps a local exclusion file in `WORKDIR` for safe persistent exclusions only:
+
+- `empty_profile`: the UID returned an empty profile response.
+- `uploaded_too_high`: the user exceeded `DONATION_MAX_RECIPIENT_UPLOADED_BYTES`.
+
+Temporary errors such as rate limits, curl failures or incomplete JSON are not stored as persistent exclusions.
 
 ### Notification settings
 
