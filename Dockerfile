@@ -1,6 +1,11 @@
 FROM mcr.microsoft.com/playwright:v1.56.1-jammy
 
-RUN apt-get update \
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Rome
+
+RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         curl \
@@ -29,7 +34,6 @@ RUN chmod +x /usr/local/bin/mam-bonus-manager \
     && chmod +x /usr/local/bin/scripts/mam-browser-gift.js \
     && mkdir -p /config /data /config/browser-profile
 
-ENV TZ=Europe/Rome
 ENV MAM_CONFIG=/config/config.env
 ENV MAM_INTERVAL_SECONDS=3600
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
