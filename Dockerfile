@@ -37,6 +37,7 @@ RUN chmod +x /usr/local/bin/mam-bonus-manager \
 ENV MAM_CONFIG=/config/config.env
 ENV MAM_INTERVAL_SECONDS=3600
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_PATH=/app/node_modules
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["scheduler"]
