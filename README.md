@@ -21,6 +21,7 @@ It validates the MAM session, reads the current seedbonus balance, and can autom
 - Optional upload ratio guard through `UPLOAD_RATIO_THRESHOLD`.
 - Optional wedge purchases, disabled by default with `WEDGE_HOURS=0`.
 - Donations to new users with cooldown, candidate limits, uploaded-amount filtering and per-user total limit.
+- Gift donations are sent through a Playwright/Chromium browser executor because MAM rejects direct API/curl gift requests.
 - Single automated spending reserve through `BONUS_RESERVE_POINTS`.
 
 ### Operations
@@ -83,7 +84,7 @@ sudo MAM_CONFIG=/etc/mam-bonus-manager/config.env ./mam-bonus-manager.sh --dry-r
 
 The `config edit` command creates or migrates the configuration file, makes a backup when needed, and opens the file in an editor.
 
-Dependencies:
+Dependencies for the core Bash/API parts:
 
 ```bash
 sudo apt update
@@ -91,6 +92,15 @@ sudo apt install -y curl jq util-linux findutils grep sed gawk
 ```
 
 `awk` is required by the donation candidate parser. On Debian/Ubuntu, `gawk` or the default `awk` provider is sufficient.
+
+Local browser dependencies are required only for real gift donations outside Docker:
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+For Docker, these browser dependencies are already included in the image.
 
 ## Configuration
 
@@ -114,7 +124,7 @@ Most variables can also be overridden with the `MAM_` prefix. For example, `BONU
 | --- | ---: | --- |
 | `MAM_ID` | required | Value of the `mam_id` cookie. Do not commit it. |
 | `MAM_ID_FILE` | empty | Optional file containing the `mam_id` value. Useful for secret management. |
-| `WORKDIR` | `/opt/MAM` | Runtime directory for cookies, lock file, state files and purchase logs. |
+| `WORKDIR` | `/opt/MAM` | Runtime directory for cookies, lock file, state files and purchase logs. In Docker, set it to `/config`. |
 
 ### Runtime settings
 
@@ -172,6 +182,36 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
+| `DONATION_BROWSER_EXECUTOR` | bundled script | Optional path to a custom browser gift executor. Leave empty for normal usage. |
+| `MAM_BROWSER_PROFILE_DIR` | `$WORKDIR/browser-profile` | Persistent Chromium profile directory used by the browser executor. |
+| `MAM_BROWSER_TIMEOUT` | `30000` | Browser executor timeout in milliseconds. |
+| `MAM_LOGIN_EMAIL` | empty | MAM web-login email used when the browser profile is not already logged in. |
+| `MAM_LOGIN_PASSWORD_FILE` | empty | File containing the MAM web-login password. Prefer this over putting a password directly in the config. |
+
+Gift donations are intentionally browser-only. The previous direct API/curl gift path is not supported because MAM returns `Not allowed via API` for gift requests outside a browser context.
+
+## Browser gift executor
+
+Gift donations are sent through the bundled Playwright/Chromium browser executor. The executor uses a persistent browser profile, so after the first successful login it can usually reuse the existing browser session.
+
+For local real donation tests outside Docker, set these values in `config.env`:
+
+```bash
+MAM_BROWSER_PROFILE_DIR="$PWD/.mam-browser-profile"
+MAM_LOGIN_EMAIL="your_mam_email"
+MAM_LOGIN_PASSWORD_FILE="$PWD/.mam-secrets/mam-password"
+```
+
+Create the password file before running real donations:
+
+```bash
+mkdir -p .mam-secrets
+nano .mam-secrets/mam-password
+chmod 700 .mam-secrets
+chmod 600 .mam-secrets/mam-password
+```
+
+The password file should contain only the MAM web-login password. Do not commit it and do not store it in the repository.
 
 ### Donation discovery settings
 
@@ -261,26 +301,7 @@ Use `config edit` to migrate the file manually and then open it in an editor. Th
 MAM_CONFIG="$PWD/config.env" ./mam-bonus-manager.sh --dry-run run
 ```
 
-## Donation planner
-
-A dedicated donation planner is available for testing the donation candidate flow independently from the main purchase cycle:
-
-```bash
-MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
-```
-
-The planner is always dry-run. It:
-
-1. validates or recreates the MAM session;
-2. reads the current point balance;
-3. keeps `BONUS_RESERVE_POINTS` untouched;
-4. discovers donation candidates;
-5. applies cooldown history and recipient filters;
-6. prints the donations it would make.
-
-Use the main script without `--dry-run` only when you want to send real purchases or donations.
-
-## Local dry-run workflow
+## Local test workflow
 
 Use this workflow to test without writing to `/etc` or `/opt`:
 
@@ -301,6 +322,9 @@ UPLOAD_PACKS="100 50"
 UPLOAD_RATIO_THRESHOLD=2.5
 WEDGE_HOURS=0
 DONATIONS=1
+MAM_BROWSER_PROFILE_DIR="$PWD/.mam-browser-profile"
+MAM_LOGIN_EMAIL="your_mam_email"
+MAM_LOGIN_PASSWORD_FILE="$PWD/.mam-secrets/mam-password"
 ```
 
 Run checks and dry-runs:
@@ -319,31 +343,60 @@ Docker is supported as an alternative to local/systemd installation.
 
 - The container does not expose ports.
 - Configuration is read from `/config/config.env`.
-- Mount `/config` read-write if you want to use the built-in `config` or `config edit` migration commands from inside the container.
-- `/data` is the persistent `WORKDIR` for cookies, lock files, state files and purchase history.
-- With Docker, set `WORKDIR="/data"` in `config.env`.
+- Mount `/config` read-write because it stores the config, cookies, lock file, donation history, purchase history and the persistent Chromium browser profile.
+- With Docker, set `WORKDIR="/config"` in `config.env`.
+- With Docker browser donations, set `MAM_BROWSER_PROFILE_DIR="/config/browser-profile"` and store the MAM password in a file such as `/config/secrets/mam-password`.
+
+The Docker image is intentionally heavier than the earlier Alpine-based image because it includes Playwright, Chromium and the browser runtime needed for gift donations. On the tested VPS image, Docker reported about `852 MB` content size and about `3.58 GB` disk usage. Exact numbers can vary by Docker storage driver, cache and base image version.
+
+Minimum Docker-specific values in `docker-config/config.env`:
+
+```bash
+WORKDIR="/config"
+MAM_BROWSER_PROFILE_DIR="/config/browser-profile"
+MAM_LOGIN_PASSWORD_FILE="/config/secrets/mam-password"
+```
+
+Create the browser-login password file inside the mounted config directory:
+
+```bash
+mkdir -p docker-config/secrets
+nano docker-config/secrets/mam-password
+chmod 700 docker-config/secrets
+chmod 600 docker-config/secrets/mam-password
+```
 
 One-off examples:
 
 ```bash
 docker run --rm ghcr.io/steventrux/mam-bonus-manager:latest --version
-docker run --rm -it \
-  -v "$PWD/docker-config:/config" \
-  -v "$PWD/docker-data:/data" \
-  ghcr.io/steventrux/mam-bonus-manager:latest config edit
+docker run --rm -it   -v "$PWD/docker-config:/config"   ghcr.io/steventrux/mam-bonus-manager:latest config edit
 
-docker run --rm -it \
-  -v "$PWD/docker-config:/config" \
-  -v "$PWD/docker-data:/data" \
-  ghcr.io/steventrux/mam-bonus-manager:latest --dry-run run
+docker run --rm -it   -v "$PWD/docker-config:/config"   ghcr.io/steventrux/mam-bonus-manager:latest --dry-run run
 
-docker run --rm -it \
-  -v "$PWD/docker-config:/config" \
-  -v "$PWD/docker-data:/data" \
-  ghcr.io/steventrux/mam-bonus-manager:latest --dry-run manual
+docker run --rm -it   -v "$PWD/docker-config:/config"   ghcr.io/steventrux/mam-bonus-manager:latest --dry-run manual
 ```
 
 For production usage, prefer versioned image tags once releases are available.
+
+## Donation planner
+
+A dedicated donation planner is available for testing the donation candidate flow independently from the main purchase cycle:
+
+```bash
+MAM_CONFIG="$PWD/config.env" ./scripts/donation-planner.sh
+```
+
+The planner is always dry-run. It:
+
+1. validates or recreates the MAM session;
+2. reads the current point balance;
+3. keeps `BONUS_RESERVE_POINTS` untouched;
+4. discovers donation candidates;
+5. applies cooldown history and recipient filters;
+6. prints the donations it would make.
+
+Use the main script without `--dry-run` only when you want to send real purchases or donations.
 
 ## Systemd timer
 
@@ -379,9 +432,11 @@ Keep secrets and runtime files out of git. Never commit or share:
 - the real `config.env` file;
 - `MAM.cookies`;
 - Telegram bot tokens or chat IDs;
-- logs containing sensitive API responses.
+- logs containing sensitive API responses;
+- `MAM_LOGIN_PASSWORD_FILE` contents;
+- the Chromium browser profile directory used by Playwright.
 
-The `WORKDIR` directory contains cookies, state files and activity history, so treat it as private.
+The `WORKDIR` directory contains cookies, state files, activity history and the Chromium browser profile, so treat it as private.
 
 Recommended workflow:
 
