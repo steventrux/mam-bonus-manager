@@ -436,6 +436,15 @@ get_profile_json() {
 
 get_points() {
   local uid="$1" response points
+
+  if [[ "${uid}" == "${MAM_UID:-}" ]]; then
+    response="$(json_get "${BASE_URL}/jsonLoad.php?snatch_summary")" || fatal "Could not read seedbonus balance from snatch summary."
+    points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
+    valid_number "$points" || fatal "Invalid seedbonus value in snatch summary JSON response: ${points:-empty}"
+    int_part "$points"
+    return 0
+  fi
+
   response="$(get_profile_json "$uid")" || fatal "Could not read seedbonus balance."
   points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
   valid_number "$points" || fatal "Invalid seedbonus value in JSON response: ${points:-empty}"
