@@ -11,6 +11,10 @@ CONFIG_ACTION="migrate"
 VERBOSITY=1
 LOG_FILE=""
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MAM_PROFILE_CACHE_DIR=""
+MAM_RATIO_CACHE_UID=""
+MAM_RATIO_CACHE_VALUE=""
+MAM_RATIO_CACHE_VALID=0
 
 log_line() {
   local level="$1"
@@ -212,6 +216,44 @@ load_config() {
     mkdir -p "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
     chmod 600 "$LOG_FILE" 2>/dev/null || true
+  fi
+}
+
+cleanup_runtime_caches() {
+  if [[ -n "${MAM_PROFILE_CACHE_DIR:-}" && -d "$MAM_PROFILE_CACHE_DIR" ]]; then
+    rm -rf "$MAM_PROFILE_CACHE_DIR"
+  fi
+}
+
+init_runtime_caches() {
+  MAM_PROFILE_CACHE_DIR="${WORKDIR}/profile-cache-run.$$"
+  rm -rf "$MAM_PROFILE_CACHE_DIR"
+  mkdir -p "$MAM_PROFILE_CACHE_DIR"
+  chmod 700 "$MAM_PROFILE_CACHE_DIR" 2>/dev/null || true
+
+  MAM_RATIO_CACHE_UID=""
+  MAM_RATIO_CACHE_VALUE=""
+  MAM_RATIO_CACHE_VALID=0
+
+  trap cleanup_runtime_caches EXIT
+}
+
+invalidate_profile_cache() {
+  local uid="$1"
+
+  [[ -n "${MAM_PROFILE_CACHE_DIR:-}" ]] || return 0
+  [[ -n "$uid" ]] || return 0
+
+  rm -f "${MAM_PROFILE_CACHE_DIR}/${uid}.json"
+}
+
+invalidate_ratio_cache() {
+  MAM_RATIO_CACHE_UID=""
+  MAM_RATIO_CACHE_VALUE=""
+  MAM_RATIO_CACHE_VALID=0
+
+  if [[ -n "${MAM_UID:-}" ]]; then
+    invalidate_profile_cache "$MAM_UID"
   fi
 }
 
@@ -422,13 +464,29 @@ ensure_session() {
 }
 
 get_profile_json() {
-  local uid="$1" response error_message
+  local uid="$1" response error_message cache_file
+
+  if [[ -n "${MAM_PROFILE_CACHE_DIR:-}" ]]; then
+    cache_file="${MAM_PROFILE_CACHE_DIR}/${uid}.json"
+    if [[ -s "$cache_file" ]]; then
+      cat "$cache_file"
+      return 0
+    fi
+  else
+    cache_file=""
+  fi
+
   response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
 
   error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
   if [[ -n "$error_message" && "$error_message" != "null" ]]; then
     warn "MAM profile API error for uid=${uid}: ${error_message}"
     return 1
+  fi
+
+  if [[ -n "$cache_file" ]]; then
+    printf '%s' "$response" > "$cache_file"
+    chmod 600 "$cache_file" 2>/dev/null || true
   fi
 
   printf '%s' "$response"
@@ -453,12 +511,25 @@ get_points() {
 
 get_ratio() {
   local uid="$1" response ratio
+
+  if [[ "${uid}" == "${MAM_UID:-}" && "${MAM_RATIO_CACHE_VALID:-0}" -eq 1 && "${MAM_RATIO_CACHE_UID:-}" == "$uid" ]]; then
+    printf '%s\n' "$MAM_RATIO_CACHE_VALUE"
+    return 0
+  fi
+
   response="$(get_profile_json "$uid")" || return 1
   ratio="$(jq -r '.ratio // .ratio_real // .uploaded_downloaded_ratio // empty' <<< "$response" 2>/dev/null | head -n1 | tr -d ',' || true)"
   valid_number "$ratio" || {
     warn "MAM profile JSON for uid=${uid} does not contain a valid ratio."
     return 1
   }
+
+  if [[ "${uid}" == "${MAM_UID:-}" ]]; then
+    MAM_RATIO_CACHE_UID="$uid"
+    MAM_RATIO_CACHE_VALUE="$ratio"
+    MAM_RATIO_CACHE_VALID=1
+  fi
+
   printf '%s\n' "$ratio"
 }
 
@@ -726,6 +797,7 @@ buy_upload_until_buffer() {
       if [[ "$new_points" -lt "$points" ]]; then
         points="$new_points"
         purchased_any=$((purchased_any + 1))
+        invalidate_ratio_cache
         record_purchase upload "$pack" "$pack_cost"
         log "Purchase completed. Remaining points reported by API: ${points}."
       else
@@ -758,6 +830,7 @@ buy_upload_until_buffer() {
       if [[ "$new_points" -lt "$points" ]]; then
         points="$new_points"
         purchased_any=$((purchased_any + 1))
+        invalidate_ratio_cache
         record_purchase upload "$pack" "$pack_cost"
         log "Purchase completed. Remaining points reported by API: ${points}."
       else
@@ -962,6 +1035,7 @@ run_main() {
 
   auto_migrate_config_if_needed
   load_config
+  init_runtime_caches
 
   exec 9>"$LOCK_FILE"
   flock -n 9 || fatal "Another run is already in progress: $LOCK_FILE"

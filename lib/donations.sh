@@ -122,7 +122,7 @@ uid_profile_is_valid() {
   local uid="$1"
   local response profile_uid username
 
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}" || true)"
+  response="$(get_profile_json "$uid" || true)"
   [[ "$response" != "[]" ]] || return 1
 
   profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
@@ -220,7 +220,7 @@ get_new_users_by_latest_uid() {
 
   uid="$start_uid"
   while [[ "$scanned" -lt "$lookback" && "$uid" -gt 0 && "$found" -lt "$max_candidates" ]]; do
-    response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}" || true)"
+    response="$(get_profile_json "$uid" || true)"
 
     if [[ "$response" != "[]" ]]; then
       profile_uid="$(jq -r '.uid // empty' <<< "$response" 2>/dev/null || true)"
@@ -270,7 +270,7 @@ get_recipient_uploaded_bytes() {
   local uid="$1"
   local response uploaded_bytes uploaded_text converted
 
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+  response="$(get_profile_json "$uid")" || return 1
 
   uploaded_bytes="$(jq -r '.uploaded_bytes // empty' <<< "$response" 2>/dev/null || true)"
   if valid_integer "$uploaded_bytes"; then
