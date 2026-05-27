@@ -500,8 +500,10 @@ send_donation() {
   fi
 
   actual_cost=$((before - after))
-  [[ "$actual_cost" -lt 0 ]] && actual_cost="$amount"
-  [[ "$actual_cost" -eq 0 ]] && actual_cost="$amount"
+  if [[ "$actual_cost" -le 0 ]]; then
+    warn "Donation to ${username} (uid=${uid}) reported success but points did not decrease. Before=${before}, After=${after}."
+    return 1
+  fi
 
   record_donation "$uid" "$username" "$actual_cost"
   record_purchase donation "${response_to_name:-$username}" "$actual_cost"
