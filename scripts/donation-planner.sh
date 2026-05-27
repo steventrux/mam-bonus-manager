@@ -66,10 +66,16 @@ load_config() {
   WORKDIR="${MAM_WORKDIR:-${WORKDIR:-/opt/MAM}}"
 
   DONATIONS="${MAM_DONATIONS:-${DONATIONS:-0}}"
+  BONUS_RESERVE_POINTS="${MAM_BONUS_RESERVE_POINTS:-${BONUS_RESERVE_POINTS:-55000}}"
   DONATION_AMOUNT="${MAM_DONATION_AMOUNT:-${DONATION_AMOUNT:-100}}"
-  DONATION_BUFFER="${MAM_DONATION_BUFFER:-${DONATION_BUFFER:-5000}}"
   DONATION_MAX_USERS_PER_RUN="${MAM_DONATION_MAX_USERS_PER_RUN:-${DONATION_MAX_USERS_PER_RUN:-5}}"
+  DONATION_MAX_POINTS_PER_USER="${MAM_DONATION_MAX_POINTS_PER_USER:-${DONATION_MAX_POINTS_PER_USER:-1000}}"
   DONATION_COOLDOWN_DAYS="${MAM_DONATION_COOLDOWN_DAYS:-${DONATION_COOLDOWN_DAYS:-30}}"
+  DONATION_MAX_RECIPIENT_UPLOADED_BYTES="${MAM_DONATION_MAX_RECIPIENT_UPLOADED_BYTES:-${DONATION_MAX_RECIPIENT_UPLOADED_BYTES:-53687091200}}"
+  DONATION_LATEST_UID_STEP="${MAM_DONATION_LATEST_UID_STEP:-${DONATION_LATEST_UID_STEP:-1000}}"
+  DONATION_SCAN_LOOKBACK="${MAM_DONATION_SCAN_LOOKBACK:-${DONATION_SCAN_LOOKBACK:-100}}"
+  DONATION_SCAN_DELAY_SECONDS="${MAM_DONATION_SCAN_DELAY_SECONDS:-${DONATION_SCAN_DELAY_SECONDS:-1}}"
+  UPLOAD_RATIO_THRESHOLD="${MAM_UPLOAD_RATIO_THRESHOLD:-${UPLOAD_RATIO_THRESHOLD:-2.5}}"
 
   CURL_TIMEOUT="${MAM_CURL_TIMEOUT:-${CURL_TIMEOUT:-30}}"
   CURL_RETRIES="${MAM_CURL_RETRIES:-${CURL_RETRIES:-3}}"
@@ -85,6 +91,12 @@ load_config() {
   COOKIE_FILE="${MAM_COOKIE_FILE:-${COOKIE_FILE:-${WORKDIR}/MAM.cookies}}"
   JSON_FILE="${MAM_JSON_FILE:-${JSON_FILE:-${WORKDIR}/MAM.json}}"
   DONATION_STATE_FILE="${MAM_DONATION_STATE_FILE:-${DONATION_STATE_FILE:-${WORKDIR}/donations.tsv}}"
+  DONATION_EXCLUSION_FILE="${MAM_DONATION_EXCLUSION_FILE:-${DONATION_EXCLUSION_FILE:-${WORKDIR}/donation-exclusions.tsv}}"
+  MAM_BROWSER_PROFILE_DIR="${MAM_BROWSER_PROFILE_DIR:-${WORKDIR}/browser-profile}"
+  MAM_BROWSER_TIMEOUT="${MAM_BROWSER_TIMEOUT:-30000}"
+  MAM_LOGIN_EMAIL="${MAM_LOGIN_EMAIL:-}"
+  MAM_LOGIN_PASSWORD_FILE="${MAM_LOGIN_PASSWORD_FILE:-}"
+  MAM_LOGIN_PASSWORD="${MAM_LOGIN_PASSWORD:-}"
 
   mkdir -p "$WORKDIR"
   chmod 700 "$WORKDIR" 2>/dev/null || true
@@ -125,27 +137,38 @@ source "${REPO_ROOT}/lib/donations.sh"
 main() {
   local uid points planned=0 candidate_uid candidate_name spendable
 
-  command -v curl >/dev/null 2>&1 || fatal "Missing dependency: curl"
-  command -v jq >/dev/null 2>&1 || fatal "Missing dependency: jq"
+  local missing=() bin
+
+  for bin in curl jq date find grep sed awk tr; do
+    command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
+  done
+  [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
 
   load_config
   truthy "$DONATIONS" || { log "DONATIONS is disabled. Nothing to plan."; return 0; }
 
+  valid_integer "$BONUS_RESERVE_POINTS" || fatal "BONUS_RESERVE_POINTS must be numeric: $BONUS_RESERVE_POINTS"
   valid_integer "$DONATION_AMOUNT" || fatal "DONATION_AMOUNT must be numeric: $DONATION_AMOUNT"
-  valid_integer "$DONATION_BUFFER" || fatal "DONATION_BUFFER must be numeric: $DONATION_BUFFER"
   valid_integer "$DONATION_MAX_USERS_PER_RUN" || fatal "DONATION_MAX_USERS_PER_RUN must be numeric: $DONATION_MAX_USERS_PER_RUN"
+  valid_integer "$DONATION_MAX_POINTS_PER_USER" || fatal "DONATION_MAX_POINTS_PER_USER must be numeric: $DONATION_MAX_POINTS_PER_USER"
+  valid_integer "$DONATION_COOLDOWN_DAYS" || fatal "DONATION_COOLDOWN_DAYS must be numeric: $DONATION_COOLDOWN_DAYS"
+  valid_integer "$DONATION_MAX_RECIPIENT_UPLOADED_BYTES" || fatal "DONATION_MAX_RECIPIENT_UPLOADED_BYTES must be numeric: $DONATION_MAX_RECIPIENT_UPLOADED_BYTES"
+  valid_integer "$DONATION_LATEST_UID_STEP" || fatal "DONATION_LATEST_UID_STEP must be numeric: $DONATION_LATEST_UID_STEP"
+  valid_integer "$DONATION_SCAN_LOOKBACK" || fatal "DONATION_SCAN_LOOKBACK must be numeric: $DONATION_SCAN_LOOKBACK"
+  valid_integer "$DONATION_SCAN_DELAY_SECONDS" || fatal "DONATION_SCAN_DELAY_SECONDS must be numeric: $DONATION_SCAN_DELAY_SECONDS"
 
   uid="$(ensure_session)" || fatal "Could not create or validate MAM session."
+  MAM_UID="$uid"
   points="$(get_points "$uid")"
-  log "Current points: ${points}. Donation buffer: ${DONATION_BUFFER}."
+  log "Current points: ${points}. Bonus reserve: ${BONUS_RESERVE_POINTS}."
 
-  if [[ "$points" -le "$DONATION_BUFFER" ]]; then
-    log "No donation planned: points are not above DONATION_BUFFER."
+  if [[ "$points" -le "$BONUS_RESERVE_POINTS" ]]; then
+    log "No donation planned: points are not above BONUS_RESERVE_POINTS."
     return 0
   fi
 
-  spendable=$((points - DONATION_BUFFER))
-  log "Donation spendable points above buffer: ${spendable}."
+  spendable=$((points - BONUS_RESERVE_POINTS))
+  log "Donation spendable points above reserve: ${spendable}."
 
   while IFS=$'\t' read -r candidate_uid candidate_name; do
     [[ -n "$candidate_uid" && -n "$candidate_name" ]] || continue
@@ -153,7 +176,7 @@ main() {
     [[ "$spendable" -ge "$DONATION_AMOUNT" ]] || break
 
     if plan_donation "$candidate_uid" "$candidate_name" "$DONATION_AMOUNT"; then
-      send_donation "$candidate_uid" "$candidate_name" "$DONATION_AMOUNT" || true
+      log "DRY-RUN: would donate ${DONATION_AMOUNT} bonus point(s) to ${candidate_name} (uid=${candidate_uid})."
       planned=$((planned + 1))
       spendable=$((spendable - DONATION_AMOUNT))
     fi
