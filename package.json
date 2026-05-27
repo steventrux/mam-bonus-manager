@@ -1,6 +1,6 @@
 {
   "name": "mam-bonus-manager",
-  "version": "1.4.1-playwright-poc",
+  "version": "1.4.4",
   "private": true,
   "description": "Safe and configurable MyAnonamouse bonus points manager with optional Playwright browser gift executor.",
   "scripts": {
