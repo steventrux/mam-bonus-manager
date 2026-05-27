@@ -90,6 +90,7 @@ services:
     environment:
       - TZ=Europe/Rome
       - MAM_CONFIG=/config/config.env
+      - MAM_WORKDIR=/data
       - MAM_INTERVAL_SECONDS=3600
     volumes:
       - ./config:/config
@@ -102,7 +103,6 @@ Adjust `user: "1000:1000"` to match the owner of the mounted `config` and `data`
 For this two-volume layout, use these values in `/config/config.env`:
 
 ```bash
-WORKDIR="/data"
 MAM_ID_FILE="/config/mam_id"
 
 DONATIONS=1
@@ -297,10 +297,12 @@ The wedge cost is fixed by MAM and is not exposed as a user-configurable setting
 | `DONATION_COOLDOWN_DAYS` | `30` | Cooldown before the same user can receive another donation. `0` means never repeat. |
 | `DONATION_MAX_RECIPIENT_UPLOADED_BYTES` | `53687091200` | Recipient uploaded threshold. Default is 50 GiB. If greater than `0`, donate only to users whose uploaded amount is less than or equal to this value. `0` disables this filter. |
 | `DONATION_STATE_FILE` | `$WORKDIR/donations.tsv` | Local donation history file. |
+| `DONATION_EXCLUSION_FILE` | `$WORKDIR/donation-exclusions.tsv` | Local persistent donation exclusion file for safe exclusions such as empty profiles or recipients above the uploaded threshold. |
 | `MAM_BROWSER_PROFILE_DIR` | `$WORKDIR/browser-profile` | Persistent Chromium profile directory used by the browser executor. |
 | `MAM_BROWSER_TIMEOUT` | `30000` | Browser executor timeout in milliseconds. |
 | `MAM_LOGIN_EMAIL` | empty | MAM web-login email used when the browser profile is not already logged in. |
 | `MAM_LOGIN_PASSWORD_FILE` | empty | File containing the MAM web-login password. Prefer this over putting a password directly in the config. |
+| `MAM_LOGIN_PASSWORD` | empty | Direct MAM web-login password value. Supported for convenience, but `MAM_LOGIN_PASSWORD_FILE` is safer. |
 
 ### Donation discovery settings
 
@@ -427,6 +429,7 @@ Keep secrets and runtime files private. Never share:
 - Telegram bot tokens or chat IDs;
 - logs containing sensitive API responses;
 - `MAM_LOGIN_PASSWORD_FILE` contents;
+- `MAM_LOGIN_PASSWORD`;
 - the Chromium browser profile directory used by Playwright.
 
 The `WORKDIR` directory contains cookies, state files, activity history and the Chromium browser profile, so treat it as private.
