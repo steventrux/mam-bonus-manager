@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="1.4.4"
+VERSION="1.4.5"
 VIP_BLOCK_COST=5000
 WEDGE_COST=50000
 CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
@@ -260,7 +260,7 @@ invalidate_ratio_cache() {
 
 check_dependencies() {
   local missing=()
-  for bin in curl jq date find flock grep sed awk mktemp; do
+  for bin in curl jq date find flock grep sed awk mktemp tr; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing dependencies: ${missing[*]}"
@@ -724,7 +724,11 @@ buy_wedge_if_needed() {
   now="$(date +%s%3N)"
   result="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=wedges&source=points&_=${now}")" || fatal "Wedge purchase failed: curl/API error."
   success="$(jq -r '.success // empty' <<< "$result" 2>/dev/null || true)"
-  [[ "$success" == "true" ]] || warn "Wedge response does not report success=true: $result"
+  if [[ "$success" != "true" ]]; then
+    warn "Wedge purchase was not confirmed: $result"
+    printf '%s\n' "$points"
+    return 0
+  fi
   touch "$WEDGE_STATE_FILE"
   record_purchase wedge 1 "$WEDGE_COST"
   refreshed_points="$(get_points "$MAM_UID")"
@@ -922,7 +926,7 @@ manual_vip_step() {
 manual_wedge_step() {
   local points="$1" spendable max_wedges count i now result success error_message estimated_cost
 
-  log "Manual step 2/4 - Wedges"
+  log "Manual step 3/4 - Wedges"
   spendable="$points"
   max_wedges=$((spendable / WEDGE_COST))
   log "Current points: ${points}. Wedge cost: ${WEDGE_COST}. Manual mode does not apply the automated global reserve. Purchasable wedges: ${max_wedges}."
@@ -951,10 +955,10 @@ manual_wedge_step() {
 }
 
 manual_upload_step() {
-  local points="$1" pack pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost current_ratio
+  local points="$1" pack pack_cost max_count chosen_pack chosen_count now response new_points error_message allowed_package=0 estimated_cost current_ratio before_points i
   valid_integer "$MIN_UPLOAD_GB" || fatal "MIN_UPLOAD_GB must be numeric: $MIN_UPLOAD_GB"
 
-  log "Manual step 3/4 - Upload credit"
+  log "Manual step 2/4 - Upload credit"
   if current_ratio="$(get_ratio "$MAM_UID")"; then
     log "Current ratio: ${current_ratio}. Configured automated threshold: ${UPLOAD_RATIO_THRESHOLD}. Manual mode does not block upload purchases by ratio."
   else
@@ -1000,14 +1004,22 @@ manual_upload_step() {
   fi
 
   for ((i = 1; i <= chosen_count; i++)); do
+    before_points="$points"
     now="$(date +%s%3N)"
     response="$(json_get "${BASE_URL}/json/bonusBuy.php/?spendtype=upload&amount=${chosen_pack}&_=${now}")" || fatal "Upload purchase ${i}/${chosen_count} failed for ${chosen_pack}GB: curl/API error."
     error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
     new_points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
     valid_number "$new_points" || fatal "Upload purchase ${i}/${chosen_count} could not be verified. API error: ${error_message:-none}. Response: $response"
     new_points="$(int_part "$new_points")"
-    record_purchase upload "$chosen_pack" "$pack_cost"
-    log "Upload purchase ${i}/${chosen_count} completed. Remaining points reported by API: ${new_points}."
+
+    if [[ "$new_points" -lt "$before_points" ]]; then
+      points="$new_points"
+      invalidate_ratio_cache
+      record_purchase upload "$chosen_pack" "$pack_cost"
+      log "Upload purchase ${i}/${chosen_count} completed. Remaining points reported by API: ${new_points}."
+    else
+      fatal "Points did not decrease after manual upload purchase ${i}/${chosen_count}. Before=${before_points}, After=${new_points}."
+    fi
   done
   printf '%s\n' "$(get_points "$MAM_UID")"
 }
@@ -1043,6 +1055,15 @@ run_main() {
 
   auto_migrate_config_if_needed
   load_config
+
+  valid_integer "$VERBOSITY" || fatal "VERBOSITY must be numeric: $VERBOSITY"
+  [[ "$VERBOSITY" -ge 0 && "$VERBOSITY" -le 2 ]] || fatal "VERBOSITY must be 0, 1 or 2: $VERBOSITY"
+  if truthy "$DRY_RUN"; then
+    DRY_RUN=1
+  else
+    DRY_RUN=0
+  fi
+
   init_runtime_caches
 
   exec 9>"$LOCK_FILE"
