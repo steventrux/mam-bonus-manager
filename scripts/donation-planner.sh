@@ -5,6 +5,7 @@ CONFIG_FILE="${MAM_CONFIG:-/etc/mam-bonus-manager/config.env}"
 DRY_RUN=1
 VERBOSITY=1
 LOG_FILE=""
+MAM_PROFILE_CACHE_DIR=""
 
 log_line() {
   local level="$1"
@@ -51,6 +52,21 @@ json_get_with_mamid() {
   local url="$1"
   curl -fsS --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout 10 --max-time "$CURL_TIMEOUT" \
     -A "$USER_AGENT" -b "mam_id=${MAM_ID}" -c "$COOKIE_FILE" "$url"
+}
+
+cleanup_runtime_caches() {
+  if [[ -n "${MAM_PROFILE_CACHE_DIR:-}" && -d "$MAM_PROFILE_CACHE_DIR" ]]; then
+    rm -rf "$MAM_PROFILE_CACHE_DIR"
+  fi
+}
+
+init_runtime_caches() {
+  MAM_PROFILE_CACHE_DIR="${WORKDIR}/profile-cache-planner.$$"
+  rm -rf "$MAM_PROFILE_CACHE_DIR"
+  mkdir -p "$MAM_PROFILE_CACHE_DIR"
+  chmod 700 "$MAM_PROFILE_CACHE_DIR" 2>/dev/null || true
+
+  trap cleanup_runtime_caches EXIT
 }
 
 load_config() {
@@ -121,9 +137,38 @@ ensure_session() {
   printf '%s\n' "$uid"
 }
 
+get_profile_json() {
+  local uid="$1" response error_message cache_file
+
+  if [[ -n "${MAM_PROFILE_CACHE_DIR:-}" ]]; then
+    cache_file="${MAM_PROFILE_CACHE_DIR}/${uid}.json"
+    if [[ -s "$cache_file" ]]; then
+      cat "$cache_file"
+      return 0
+    fi
+  else
+    cache_file=""
+  fi
+
+  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || return 1
+
+  error_message="$(jq -r '.error // empty' <<< "$response" 2>/dev/null || true)"
+  if [[ -n "$error_message" && "$error_message" != "null" ]]; then
+    warn "MAM profile API error for uid=${uid}: ${error_message}"
+    return 1
+  fi
+
+  if [[ -n "$cache_file" ]]; then
+    printf '%s' "$response" > "$cache_file"
+    chmod 600 "$cache_file" 2>/dev/null || true
+  fi
+
+  printf '%s' "$response"
+}
+
 get_points() {
   local uid="$1" response points
-  response="$(json_get "${BASE_URL}/jsonLoad.php?id=${uid}")" || fatal "Could not read seedbonus balance."
+  response="$(get_profile_json "$uid")" || fatal "Could not read seedbonus balance."
   points="$(jq -r '.seedbonus // empty' <<< "$response" 2>/dev/null || true)"
   [[ "$points" =~ ^[0-9]+([.][0-9]+)?$ ]] || fatal "Invalid seedbonus value: ${points:-empty}"
   printf '%s\n' "$points" | sed -E 's/\..*$//'
@@ -146,6 +191,7 @@ main() {
 
   load_config
   truthy "$DONATIONS" || { log "DONATIONS is disabled. Nothing to plan."; return 0; }
+  init_runtime_caches
 
   valid_integer "$BONUS_RESERVE_POINTS" || fatal "BONUS_RESERVE_POINTS must be numeric: $BONUS_RESERVE_POINTS"
   valid_integer "$DONATION_AMOUNT" || fatal "DONATION_AMOUNT must be numeric: $DONATION_AMOUNT"
