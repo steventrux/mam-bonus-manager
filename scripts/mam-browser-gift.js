@@ -83,6 +83,24 @@ async function readSummary(page) {
   });
 }
 
+function parseSeedbonus(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value).replace(/,/g, '').trim();
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.trunc(parsed);
+}
+
 function summaryIdentity(summary) {
   const uid = summary && summary.data ? summary.data.uid : null;
   const username = summary && summary.data ? summary.data.username : null;
@@ -308,9 +326,18 @@ async function sendGift(uidArg, amountArg) {
 
     const afterSummary = await readSummary(page).catch(() => null);
     const afterIdentity = summaryIdentity(afterSummary);
+    const beforeSeedbonusValue = parseSeedbonus(beforeSeedbonus);
+    const afterSeedbonusValue = parseSeedbonus(afterIdentity.seedbonus);
+    let success = result.success;
+    let error = result.error || undefined;
+
+    if (success && beforeSeedbonusValue !== null && afterSeedbonusValue !== null && afterSeedbonusValue >= beforeSeedbonusValue) {
+      success = false;
+      error = 'seedbonus_did_not_decrease_after_gift';
+    }
 
     printJson({
-      success: result.success,
+      success,
       mode: 'gift',
       uid,
       amount,
@@ -320,16 +347,18 @@ async function sendGift(uidArg, amountArg) {
       accountUsername: loginState.username,
       beforeSeedbonus,
       afterSeedbonus: afterIdentity.seedbonus,
+      beforeSeedbonusValue,
+      afterSeedbonusValue,
       httpStatus: result.httpStatus,
       contentType: result.contentType,
-      error: result.error || undefined,
+      error,
       response: result.data || undefined,
       preview: result.preview || undefined,
       profileDir: PROFILE_DIR,
       headless: HEADLESS,
     });
 
-    return result.success ? 0 : 4;
+    return success ? 0 : 4;
   });
 }
 

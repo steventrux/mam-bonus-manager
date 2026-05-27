@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - docker-ghcr
   pull_request:
 
 jobs:
@@ -19,7 +18,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Bash syntax check
-        run: bash -n mam-bonus-manager.sh
+        run: |
+          bash -n mam-bonus-manager.sh
+          bash -n lib/donations.sh
+          bash -n scripts/donation-planner.sh
+          bash -n docker-entrypoint.sh
+
+      - name: Node syntax check
+        run: node --check scripts/mam-browser-gift.js
 
       - name: ShellCheck
         run: shellcheck mam-bonus-manager.sh
@@ -34,8 +40,8 @@ jobs:
         run: |
           mkdir -p test-config test-data
           cp config/config.env.example test-config/config.env
-          sed -i 's|WORKDIR="/opt/MAM"|WORKDIR="/data"|' test-config/config.env
           docker run --rm \
+            -e MAM_WORKDIR=/data \
             -v "$PWD/test-config:/config" \
             -v "$PWD/test-data:/data" \
             mam-bonus-manager:test help
