@@ -10,6 +10,9 @@ RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
         bash \
         curl \
         jq \
+        grep \
+        sed \
+        gawk \
         util-linux \
         findutils \
         coreutils \
